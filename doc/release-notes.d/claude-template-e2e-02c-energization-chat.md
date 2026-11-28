@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can now set the grid connection's energized MW for one period (`set_energization_period`), through the same route, checks and undo step as the connection drawer in Guided section 3; a project viewer is refused.

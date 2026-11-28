@@ -78,7 +78,6 @@ def test_the_issue_rows_are_declared():
         'report_comment_revisions': ('unbuilt', None),
         'report_revision_drafts': ('out of chat', None),
         'report_chart_snapshots': ('manual', 'results'),
-        'energization_per_period': ('unbuilt', None),  # template-e2e 02b (not_via_chat.d/)
         'energization_timeline': ('unbuilt', None),  # DC review 06 (not_via_chat.d/)
         'multi_objective_front': ('unbuilt', None),  # DC 01 PR2a (not_via_chat.d/)
         'equipment_schedule': ('unbuilt', None),  # DC review 09 (not_via_chat.d/)
@@ -98,6 +97,7 @@ def test_the_issue_rows_are_declared():
         ('POST', '/api/simulation/queue/pause'), ('POST', '/api/simulation/queue/resume'),
     })
     assert 'series_file_upload' not in entries
+    assert 'energization_per_period' not in entries  # template-e2e 02: set_energization_period
     # ui-modern 03 S3 (GK B S8): the strip's changes are not chat's comparison.
     assert 'compares a case with its base on other measures' in entries['results_headline_strip']['reason']
 

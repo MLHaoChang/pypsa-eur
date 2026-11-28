@@ -1,0 +1,28 @@
+{
+  "kinds": {
+    "energization_invalid_request": {
+      "surface": "inline",
+      "why": "set_energization_period (PUT /flow/energization) refuses a body that is not {link, period, mw}; nothing is written and the assistant re-sends the Link's name, the period and the MW."
+    },
+    "energization_invalid_mw": {
+      "surface": "inline",
+      "why": "set_energization_period refuses an MW that is a bool, not a number, not finite or not above 0; nothing is written and the assistant asks the user for a positive MW."
+    },
+    "energization_no_schedule": {
+      "surface": "inline",
+      "why": "set_energization_period refuses a Link with no energization schedule and never creates one; the assistant reads get_project_flow's connection row for the Links that have one."
+    },
+    "energization_unknown_period": {
+      "surface": "inline",
+      "why": "set_energization_period refuses a period the network does not have (a year not in the snapshots' first level, or anything but \"all\" on a single-period network); the assistant picks a period from the connection row's by_period."
+    },
+    "energization_period_not_flat": {
+      "surface": "inline",
+      "why": "set_energization_period refuses a period whose MW varies within it, naming its range, and never scales it; the assistant tells the user to set that period on the network."
+    },
+    "energization_timeline_unavailable": {
+      "surface": "inline",
+      "why": "GET /flow/energization_timeline (the Guided chart; no chat tool reads it, see not_via_chat energization_timeline) answers 422 without a data-centre load; listed because the typed-refusal walk over-approximates."
+    }
+  }
+}

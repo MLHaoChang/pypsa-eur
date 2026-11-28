@@ -344,6 +344,15 @@ def test_a_spliced_family_keeps_its_old_place(stem, table):
             list(chat_tools.DISPATCHERS),
         ),
     }[table]
+    # Fragments that are not spliced are appended after the monolith in ORDER
+    # (contract item 2); the place pinned here is among the spliced keys.
+    appended = {
+        name
+        for s, mod in F.discover(F.SCHEMA_PACKAGE).items()
+        if s not in catalogue._FRAGMENTS.spliced
+        for name in mod.ROUTES.keys() | {t["name"] for t in mod.TOOLS}
+    }
+    keys = [k for k in keys if k not in appended]
     i = keys.index(own[0])
     tail = [] if after is None else [after]
     assert keys[i - 1 : i + len(own) + 1] == [before, *own, *tail]
@@ -738,6 +747,7 @@ PROXIES = {
         "get_adequacy_results",
         "get_asset_health",
     ],
+    "energization": [],
     "explanation": ["get_asset_results", "get_results"],
     "ui_control": ["_acting"],
     "asset_results": ["_save_agent_export"],
@@ -881,6 +891,7 @@ def test_the_circular_import_cases_are_exactly_the_discovered_fragments():
         "adequacy_studies",
         "asset_results",
         "campus_electrical",
+        "energization",
         "explanation",
         "lv08_bcampus",
         "report_templates",

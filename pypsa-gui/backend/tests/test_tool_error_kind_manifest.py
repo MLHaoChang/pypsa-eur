@@ -161,6 +161,29 @@ def _workflow_refuse_kinds(tree: ast.AST) -> set[str]:
     return found
 
 
+# Typed refusals raised through a constructor or helper whose first argument is
+# the kind, which no dict or yield walk sees (template-e2e 02: the energization
+# route, reached from chat by set_energization_period).
+_TYPED_REFUSAL_CALLS = frozenset({"EnergizationEditError", "_energization_refused"})
+
+
+def _typed_refusal_kinds(tree: ast.AST) -> set[str]:
+    """`EnergizationEditError("kind", ...)` and the route's
+    `_energization_refused("kind", ...)`: literal first arguments."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        callee = func.id if isinstance(func, ast.Name) else (
+            func.attr if isinstance(func, ast.Attribute) else None)
+        arg = node.args[0]
+        if (callee in _TYPED_REFUSAL_CALLS and isinstance(arg, ast.Constant)
+                and isinstance(arg.value, str)):
+            found.add(arg.value)
+    return found
+
+
 def derive_tool_error_kinds() -> set[str]:
     """Every `error_kind` that can reach the client on a `tool_error` frame."""
     kinds: set[str] = set(_FORWARDER_FALLBACKS)
@@ -173,6 +196,7 @@ def derive_tool_error_kinds() -> set[str]:
         kinds |= _yielded_tool_error_kinds(tree)
         kinds |= _error_kind_dict_kinds(tree)
         kinds |= _workflow_refuse_kinds(tree)
+        kinds |= _typed_refusal_kinds(tree)
         if path.relative_to(BACKEND).as_posix() in (*_REFUSE_HELPER_MODULES, *_REFUSE_IMPORTING_MODULES):
             kinds |= _refuse_helper_kinds(tree)
     return kinds
