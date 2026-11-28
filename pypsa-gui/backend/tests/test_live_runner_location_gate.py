@@ -242,6 +242,40 @@ def test_the_worker_rechecks_at_dequeue_and_never_solves(
     assert job["status"] == "failed", job
     assert job["condition"] == CODE and job["error"].startswith(CODE), job
     assert solved == []
+    # The card reaches the solver state that /status and the SSE `done` read,
+    # so the user sees why (issue 50).
+    st = client.get("/api/simulation/status").json()
+    assert st["condition"] == CODE, st
+    assert st["failure"]["category"] == CODE, st
+
+
+def test_any_other_dequeue_failure_keeps_queue_error_and_no_card(
+    client, install_network, tmp_projects_dir, idle_queue, monkeypatch
+):
+    from services import solver_service
+
+    name = _save(client, install_network)
+    _put_anchor(client, name, confirmed=True)
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(solver_service, "run_simulation", boom)
+    r = client.post("/api/simulation/queue", json={"project_id": name})
+    assert r.status_code == 200, r.text
+    jid = r.json()["id"]
+    deadline = time.time() + 30
+    job = None
+    while time.time() < deadline:
+        jobs = client.get("/api/simulation/queue").json()
+        job = next(j for j in (jobs if isinstance(jobs, list) else jobs["jobs"]) if j["id"] == jid)
+        if job["status"] in ("failed", "completed", "aborted"):
+            break
+        time.sleep(0.1)
+    assert job["status"] == "failed", job
+    st = client.get("/api/simulation/status").json()
+    assert st["condition"] == "queue_error", st
+    assert not st["failure"], st
 
 
 def test_the_enqueue_gate_does_not_wait_for_a_running_solve(

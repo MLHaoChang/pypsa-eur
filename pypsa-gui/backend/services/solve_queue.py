@@ -61,6 +61,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import timezone
 from typing import Any
+from services.failure_taxonomy import classify_failure
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +163,6 @@ def _owning_org(project_key: str | None):
     with (change_log_service.owning_org(org) if org and rest
           else change_log_service.suppressed()):
         yield
-
-
-from services.failure_taxonomy import classify_failure  # noqa: E402
 
 
 class SiteLocationRefused(Exception):
@@ -1577,16 +1575,6 @@ class SolveQueue:
 
             n = ctx.network
             lock = ctx.mutation_lock
-            # STUDY-GATE-1 (issue 48): re-checked on the network this job is
-            # about to solve, so a job queued or persisted before the enqueue
-            # gate (or whose anchor was since withdrawn) fails typed and is
-            # never solved.
-            from services import site_location
-
-            _no_location = site_location.refusal(
-                n, pathlib.Path(job.storage_dir) if job.storage_dir else None)
-            if _no_location:
-                raise SiteLocationRefused(_no_location)
             # THIS job's config, snapshotted at enqueue — not whatever the
             # context holds now. Falling back to the context's config keeps
             # hand-made jobs (and any row written before 0005) working.
@@ -1657,6 +1645,17 @@ class SolveQueue:
                 **cleared_result_state(),
                 ))
 
+            # STUDY-GATE-1 (issue 48): re-checked on the network this job is
+            # about to solve, so a job queued or persisted before the enqueue
+            # gate (or whose anchor was since withdrawn) fails typed and is
+            # never solved. Run after the claim (thread=me), so the
+            # failure path below writes the typed condition and card to this ctx.
+            from services import site_location
+
+            _no_location = site_location.refusal(
+                n, pathlib.Path(job.storage_dir) if job.storage_dir else None)
+            if _no_location:
+                raise SiteLocationRefused(_no_location)
             # 3. Solve (synchronous; honours stop_event). Writes LOPF dispatch
             #    onto n's _t tables and side-results into ctx.solver_state via the
             #    injected sink. `solving_context(ctx)` retargets the transient-row
