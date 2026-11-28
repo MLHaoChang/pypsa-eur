@@ -2037,7 +2037,7 @@ def get_status():
         stamp = (getattr(network, "meta", None) or {}).get("assistant_solve_at")
         solved_at = stamp if isinstance(stamp, str) else None
     objective = s["objective"]
-    basis_of = network
+    basis_network = network
     if dispatch == "none":
         # A finished Guided study's own solve is the latest run (template-e2e 30).
         from services import study_solve
@@ -2045,8 +2045,8 @@ def get_status():
         held = study_solve.fallback()
         if held is not None:
             dispatch, objective = "fresh", held["objective"]
-            basis_of = held["network"]
-    basis = (run_objective_basis(basis_of) if objective is not None and basis_of is not None
+            basis_network = held["network"]
+    basis = (run_objective_basis(basis_network) if objective is not None and basis_network is not None
              else {"objective_basis": None, "objective_discounted_to": None})
     return {
         "running": s["status"] == "running",
