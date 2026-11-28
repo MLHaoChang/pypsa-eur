@@ -496,4 +496,15 @@ def headline_kpis(
     }
     cards = [build[c]() if c in build else _checked(ctx, c) for c in ORDER[kind]]
     cards = [c for c in cards if c is not None]
+    for c in cards:
+        if c["id"] == "lcoe":
+            # Above the owner's bound, one muted sentence (te-24, LCOE-CAVEAT-1).
+            from services.results.lcoe_caveat import lcoe_caveat
+
+            c["caveat"] = lcoe_caveat(
+                c["value"] if c["state"] == "ready" else None,
+                c["unit"],
+                template=template,
+                n=ctx.network,
+            )
     return {"kind": kind, "cards": cards}

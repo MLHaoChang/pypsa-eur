@@ -5327,6 +5327,7 @@
         "system-cost-breakdown/1",
         "renewable-share/1",
         "link-flow/1",
+        "store-dispatch/1",
         "storage-cycles/1",
         "energy-balance/1",
         "site-import/1",
@@ -7521,6 +7522,60 @@
     "final_state_of_charge"
    ]
   },
+  "store-dispatch/1": {
+   "definitions": {
+    "final_store_energy": {
+     "formula_id": "store-final-energy/1",
+     "label": "Stored energy at the window's end",
+     "unit": "MWh"
+    },
+    "peak_store_charging": {
+     "formula_id": "store-peak-charging/1",
+     "label": "Peak charging power",
+     "unit": "MW"
+    },
+    "peak_store_discharging": {
+     "formula_id": "store-peak-discharging/1",
+     "label": "Peak discharging power",
+     "unit": "MW"
+    },
+    "peak_store_fill": {
+     "formula_id": "store-peak-fill-of-optimised-capacity/1",
+     "label": "Peak fill of the optimised capacity",
+     "unit": "%"
+    },
+    "store_charged_energy": {
+     "formula_id": "store-charged-energy/1",
+     "label": "Energy charged into the store",
+     "unit": "MWh"
+    },
+    "store_discharged_energy": {
+     "formula_id": "store-discharged-energy/1",
+     "label": "Energy discharged from the store",
+     "unit": "MWh"
+    },
+    "store_net_energy": {
+     "formula_id": "store-net-delivered-energy/1",
+     "label": "Net energy delivered to the bus",
+     "unit": "MWh"
+    },
+    "store_standing_loss": {
+     "formula_id": "store-standing-loss/1",
+     "label": "Standing loss in the store",
+     "unit": "MWh"
+    }
+   },
+   "metrics": [
+    "store_charged_energy",
+    "store_discharged_energy",
+    "store_net_energy",
+    "store_standing_loss",
+    "peak_store_charging",
+    "peak_store_discharging",
+    "final_store_energy",
+    "peak_store_fill"
+   ]
+  },
   "system-cost-breakdown/1": {
    "definitions": {
     "objective_residual": {
@@ -7737,6 +7792,7 @@
      "system-cost-breakdown/1",
      "renewable-share/1",
      "link-flow/1",
+     "store-dispatch/1",
      "storage-cycles/1",
      "energy-balance/1",
      "site-import/1",

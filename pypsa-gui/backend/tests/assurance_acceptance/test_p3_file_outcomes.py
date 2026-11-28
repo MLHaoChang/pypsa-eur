@@ -1347,11 +1347,9 @@ def test_the_frontend_file_tool_lists_match_the_backend():
     ts = (
         pathlib.Path(__file__).parents[3] / "frontend/src/components/toolOutcome.ts"
     ).read_text()
-    block = re.search(r"const FILE_TOOLS[^=]*= new Set\(\[(.*?)\]\)", ts, re.S).group(1)
-    assert (
-        set(re.findall(r"'(\w+)'", block))
-        == outcomes.IMPORT_TOOLS | outcomes.EXPORT_TOOLS
-    )
+    # AA04-P12 (#2120) retired adapter_pending and with it the frontend's FILE_TOOLS
+    # copy; the import verbs below are the one file-tool list the frontend still keeps.
+    assert "FILE_TOOLS" not in ts
     verbs = re.search(r"const WRITE_VERBS[^=]*= \{(.*?)\n\}", ts, re.S).group(1)
     assert set(re.findall(r"(\w+): 'imported'", verbs)) == outcomes.IMPORT_TOOLS
 

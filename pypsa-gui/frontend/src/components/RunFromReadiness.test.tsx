@@ -5,13 +5,28 @@ import { useUIStore } from '../store/uiStore'
 import type { RunGate } from '../hooks/useRunGate'
 
 const gate = vi.hoisted(() => ({ value: { blocked: false, checking: false } as Partial<RunGate> }))
-vi.mock('../hooks/useRunGate', () => ({ useRunGate: () => gate.value }))
+const kinds = vi.hoisted(() => ({ asked: [] as string[], hasStudy: false }))
+vi.mock('../hooks/useRunGate', () => ({
+  useRunGate: (kind: string) => { kinds.asked.push(kind); return gate.value },
+}))
+vi.mock('../hooks/useVerdictStudyEntry', () => ({
+  useVerdictStudyEntry: () => ({ hasStudy: kinds.hasStudy }),
+}))
 
 import { RunFromReadiness } from './RunFromReadiness'
 
 afterEach(() => cleanup())
 
 describe('RunFromReadiness', () => {
+  it('reads the gate of the run the header starts: all kinds in Expert with a study (TE2E-17)', () => {
+    gate.value = { blocked: false, checking: false }
+    kinds.hasStudy = true; kinds.asked = []
+    useUIStore.setState({ uiMode: 'expert' })
+    render(<RunFromReadiness />)
+    expect(kinds.asked.at(-1)).toBe('all')
+    kinds.hasStudy = false
+  })
+
   it('asks the header Run to start, through requestRunSolve', () => {
     gate.value = { blocked: false, checking: false }
     const before = useUIStore.getState().runSolveRequest

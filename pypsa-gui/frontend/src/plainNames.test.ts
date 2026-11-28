@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { archetypeLabel, controlModeLabel, islandScenarioLabel, librarySeriesLabel, paramLabel } from './plainNames'
+import { archetypeLabel, controlModeLabel, islandScenarioLabel, ehRoleLabel, librarySeriesLabel, paramLabel } from './plainNames'
 
 const SNAKE = /\b[a-z]+(_[a-z0-9]+)+\b/
 
@@ -22,5 +22,11 @@ describe('plain names (RAW-NAMES-1)', () => {
   })
   it('falls back to sentence case for an unknown id', () => {
     expect(paramLabel('some_new_knob')).toBe('Some new knob')
+  })
+  it('names every Energy Hub link role in words', () => {
+    for (const r of ['grid_import', 'eh_import', 'import', 'eh_conversion', 'conversion', 'electrolyser', 'fuel_cell']) {
+      expect(ehRoleLabel(r)).not.toMatch(SNAKE)
+    }
+    expect(ehRoleLabel('grid_import')).toBe('Grid import')
   })
 })

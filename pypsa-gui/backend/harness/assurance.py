@@ -415,7 +415,7 @@ class Turn:
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
                     lost_load_calculations, site_import_calculations, investment_calculations, copt_calculations,
                     grid_readiness_calculations, time_to_power_calculations, losses_calculations, system_cost_calculations,
-                    renewable_share_calculations, link_flow_calculations,
+                    renewable_share_calculations, link_flow_calculations, store_dispatch_calculations,
                     price_calculations, storage_cycles_calculations,
                 )
 
@@ -429,6 +429,7 @@ class Turn:
                             | system_cost_calculations.REFUSALS
                             | renewable_share_calculations.REFUSALS
                             | link_flow_calculations.REFUSALS
+                            | store_dispatch_calculations.REFUSALS
                             | answer_sections.REFUSALS | ac_branch_calculations.REFUSALS
                             | losses_calculations.REFUSALS
                             | {"too_many_metrics_for_warnings"})
@@ -661,6 +662,7 @@ class Turn:
             assurance_metrics.time_to_power.PROFILE: "Network",
             assurance_metrics.renewable_share.PROFILE: "Network",
             assurance_metrics.link_flow.PROFILE: "Link",
+            assurance_metrics.store_dispatch.PROFILE: "Store",
             assurance_metrics.system_cost.PROFILE:
                 "Network" if self.request_scope["entity_id"] == "network" else "Carrier",
             assurance_metrics.curtailment.PROFILE:
@@ -700,6 +702,8 @@ class Turn:
             lines.extend(assurance_metrics.renewable_share.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.link_flow.PROFILE:
             lines.extend(assurance_metrics.link_flow.notes(record["raw"], self.request_scope, _label))
+        if profile == assurance_metrics.store_dispatch.PROFILE:
+            lines.extend(assurance_metrics.store_dispatch.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.curtailment.PROFILE:
             lines.extend(assurance_metrics.curtailment.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.losses.PROFILE:

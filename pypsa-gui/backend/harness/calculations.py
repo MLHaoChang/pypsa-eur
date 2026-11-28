@@ -38,6 +38,7 @@ from harness import time_to_power_calculations as time_to_power
 from harness import system_cost_calculations as system_cost
 from harness import renewable_share_calculations as renewable_share
 from harness import link_flow_calculations as link_flow
+from harness import store_dispatch_calculations as store_dispatch
 
 PROFILE = "generator-dispatch/1"
 MAX_SNAPSHOTS = 512
@@ -102,7 +103,7 @@ DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRIC
                **cycles.METRICS, **balance.METRICS, **site_import.METRICS, **investment.METRICS,
                **investment.LCOE_METRICS, **copt_screen.METRICS,
                **readiness.METRICS, **time_to_power.METRICS, **losses.METRICS, **system_cost.METRICS,
-               **renewable_share.METRICS, **link_flow.METRICS}
+               **renewable_share.METRICS, **link_flow.METRICS, **store_dispatch.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
 # AA-09 S2: a retained baseline is comparable only on these scope keys, the same
 # window identity (fact_identity.window: boundaries, snapshot count, weight basis)
@@ -141,6 +142,7 @@ PROFILES = {
     system_cost.PROFILE: tuple(system_cost.METRICS),
     renewable_share.PROFILE: tuple(renewable_share.METRICS),
     link_flow.PROFILE: tuple(link_flow.METRICS),
+    store_dispatch.PROFILE: tuple(store_dispatch.METRICS),
 }
 # Profiles added after the pilot's first five run only when listed explicitly
 # in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
@@ -149,7 +151,7 @@ OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, *ac_branch.PROFI
                              cycles.PROFILE, balance.PROFILE, site_import.PROFILE,
                              *investment.PROFILES, *copt_screen.PROFILES,
                              readiness.PROFILE, time_to_power.PROFILE, losses.PROFILE, system_cost.PROFILE,
-                             renewable_share.PROFILE, link_flow.PROFILE})
+                             renewable_share.PROFILE, link_flow.PROFILE, store_dispatch.PROFILE})
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
     "Expenditure excludes fixed, startup, shutdown and quadratic costs; it is not total system cost. "
@@ -578,6 +580,8 @@ def _scoped_source(ctx, scope, owner=None, investment_state=None):
         return renewable_share.source(ctx, scope["entity_id"])
     if scope["profile"] == link_flow.PROFILE:
         return link_flow.source(ctx, scope["entity_id"])
+    if scope["profile"] == store_dispatch.PROFILE:
+        return store_dispatch.source(ctx, scope["entity_id"])
     if scope["profile"] in investment.PROFILES:
         return investment.source(ctx, scope["entity_id"], investment_state, scope["profile"])
     if scope["profile"] in branch.PROFILES:
@@ -853,6 +857,8 @@ def scoped_calculate(raw, scope):
         return renewable_share.calculate(raw, scope)
     if scope["profile"] == link_flow.PROFILE:
         return link_flow.calculate(raw, scope)
+    if scope["profile"] == store_dispatch.PROFILE:
+        return store_dispatch.calculate(raw, scope)
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
     if scope["profile"] == storage_costs.PROFILE:
@@ -1054,6 +1060,8 @@ def disclosure(scope):
         return renewable_share.DISCLOSURE
     if scope["profile"] == link_flow.PROFILE:
         return link_flow.DISCLOSURE
+    if scope["profile"] == store_dispatch.PROFILE:
+        return store_dispatch.DISCLOSURE
     if scope["profile"] == storage_costs.PROFILE:
         return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:

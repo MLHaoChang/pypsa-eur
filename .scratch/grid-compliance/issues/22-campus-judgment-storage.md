@@ -3,7 +3,7 @@
 
 # GC-22 Campus service: store and serve the pack read-back judgment
 
-Status: ready-for-agent
+Status: done (#2094, 0a4f7e26)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07 part 5, pack read-back)
 Gated: yes (GK B, backend)
