@@ -25,6 +25,8 @@ export interface EhSizingConnection {
   connection_check?: 'within' | 'exceeds' | 'unbounded' | null
   grid_supply_counted?: string[] | null
   product_slacks?: EhProductSlack[] | null
+  /** The span the slacks' energy is over, in words ("2027–2035", "8,760 h"). */
+  horizon?: string | null
 }
 
 /** `eh_report.CONNECTION_TOL_MW`: the peak may sit this far above the limit
@@ -52,23 +54,32 @@ export function fmt1(v: number | null | undefined, unit?: string | null): string
   return unit ? `${text} ${unit}` : text
 }
 
-function connectionCell(p: EhSizingConnection): string {
+/** "2030", "2030 and 2035", "2027, 2030 and 2035" (`evidence._and`). */
+function and(items: string[]): string {
+  return items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/** `evidence._connection_cell`: the limit and the peak import checked
+ *  against it. The verdict is the payload's; only the excess's words round. */
+export function connectionCell(p: EhSizingConnection): string {
   const check = p.connection_check
   if (check === 'unbounded') {
     return 'unbounded connection: a grid generator sits at the point of '
       + 'connection with no import link, so no limit applies'
   }
   const limit = p.grid_connection_mw
-  if (limit == null) return `not established: ${p.grid_connection_refusal || 'no connection limit'}`
+  if (limit == null) return `Not established: ${p.grid_connection_refusal || 'the network sets no connection limit.'}`
   let cell = fmt1(limit, 'MW')
   const peak = p.grid_import_peak_mw
-  if (peak != null && (check === 'within' || check === 'exceeds')) {
-    cell += `; peak import ${fmt1(peak, 'MW')}, ${check === 'within' ? 'within' : 'EXCEEDS'} the limit`
-    const over = Object.entries(p.grid_import_peak_by_period ?? {})
-      .filter(([, v]) => v > limit + CONNECTION_TOL_MW).map(([k]) => k)
-    if (over.length) cell += ` in ${over.join(', ')}`
-  }
-  return cell
+  if (peak == null || (check !== 'within' && check !== 'exceeds')) return cell
+  cell += ` · peak import ${fmt1(peak, 'MW')}`
+  if (check === 'within') return `${cell} · within the limit`
+  // Rounded first, as the report does: 40.05 - 40 is 0.04999..., an excess of 0.05.
+  const excess = Math.round((peak - limit) * 1e9) / 1e9
+  cell += excess < 0.05 ? ' · exceeds the limit by less than 0.1 MW' : ` · exceeds the limit by ${fmt1(excess, 'MW')}`
+  const over = Object.entries(p.grid_import_peak_by_period ?? {})
+    .filter(([, v]) => v > limit + CONNECTION_TOL_MW).map(([k]) => k)
+  return over.length ? `${cell} · in ${and(over)}` : cell
 }
 
 const SLACK_WORDS: Record<string, string> = { shortfall: 'Shortfall', buy_in: 'Bought in' }
@@ -79,13 +90,14 @@ const SLACK_WORDS: Record<string, string> = { shortfall: 'Shortfall', buy_in: 'B
 export function notCountedRows(payload: unknown): [string, string][] | null {
   if (payload == null || typeof payload !== 'object' || !('grid_connection_mw' in payload)) return null
   const p = payload as EhSizingConnection
+  const over = p.horizon ? `over the horizon (${p.horizon})` : 'over the horizon'
   const rows: [string, string][] = [[GRID_ROW, connectionCell(p)]]
   for (const s of p.product_slacks ?? []) {
     // A slack that delivered nothing has no row (the report's own rule).
     if (s.energy == null || Math.abs(s.energy) < 1e-9) continue
     rows.push([
       `${Object.prototype.hasOwnProperty.call(SLACK_WORDS, s.process_role) ? SLACK_WORDS[s.process_role] : s.process_role}, ${s.carrier || s.name} (not counted)`,
-      `${fmt1(s.p_nom, s.unit)}; ${fmt1(s.energy, s.energy_unit)} over the horizon`,
+      `${fmt1(s.p_nom, s.unit)} · ${fmt1(s.energy, s.energy_unit)} ${over}`,
     ])
   }
   for (const line of p.grid_supply_counted ?? []) rows.push(['Grid supply counted', String(line)])

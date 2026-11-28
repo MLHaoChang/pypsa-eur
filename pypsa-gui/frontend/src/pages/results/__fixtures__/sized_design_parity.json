@@ -37,12 +37,13 @@
    "grid_import_peak_by_period": null,
    "connection_check": "within",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "8,760 h"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "40.0 MW; peak import 20.0 MW, within the limit"
+    "40.0 MW · peak import 20.0 MW · within the limit"
    ]
   ]
  },
@@ -142,12 +143,13 @@
    },
    "connection_check": "exceeds",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "2027–2035"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "55.0 MW; peak import 57.8 MW, EXCEEDS the limit in 2035"
+    "55.0 MW · peak import 57.8 MW · exceeds the limit by 2.8 MW · in 2035"
    ]
   ]
  },
@@ -212,12 +214,13 @@
    "grid_import_peak_by_period": null,
    "connection_check": "within",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "8,760 h"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "200.0 MW; peak import 100.0 MW, within the limit"
+    "200.0 MW · peak import 100.0 MW · within the limit"
    ]
   ]
  },
@@ -259,12 +262,13 @@
    "grid_import_peak_by_period": null,
    "connection_check": "within",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "8,760 h"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "20.0 MW; peak import 10.0 MW, within the limit"
+    "20.0 MW · peak import 10.0 MW · within the limit"
    ]
   ]
  },
@@ -439,12 +443,13 @@
    },
    "connection_check": "exceeds",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "2027–2035"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "200.0 MW; peak import 210.0 MW, EXCEEDS the limit in 2035"
+    "200.0 MW · peak import 210.0 MW · exceeds the limit by 10.0 MW · in 2035"
    ]
   ]
  },
@@ -616,12 +621,13 @@
    },
    "connection_check": "exceeds",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "2027–2035"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "20.0 MW; peak import 21.0 MW, EXCEEDS the limit in 2035"
+    "20.0 MW · peak import 21.0 MW · exceeds the limit by 1.0 MW · in 2035"
    ]
   ]
  },
@@ -839,20 +845,21 @@
      "unit": "MW_NH3",
      "energy_unit": "MWh_NH3"
     }
-   ]
+   ],
+   "horizon": "2027–2035"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "200.0 MW; peak import 210.0 MW, EXCEEDS the limit in 2035"
+    "200.0 MW · peak import 210.0 MW · exceeds the limit by 10.0 MW · in 2035"
    ],
    [
     "Bought in, NH3 import (not counted)",
-    "32.3 MW_NH3; 52.1 MWh_NH3 over the horizon"
+    "32.3 MW_NH3 · 52.1 MWh_NH3 over the horizon (2027–2035)"
    ],
    [
     "Shortfall, NH3 shortfall (not counted)",
-    "32.3 MW_NH3; 52.1 MWh_NH3 over the horizon"
+    "32.3 MW_NH3 · 52.1 MWh_NH3 over the horizon (2027–2035)"
    ]
   ]
  },
@@ -998,16 +1005,17 @@
      "unit": "t/h",
      "energy_unit": "t"
     }
-   ]
+   ],
+   "horizon": "2027–2035"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "35.0 MW; peak import 36.8 MW, EXCEEDS the limit in 2035"
+    "35.0 MW · peak import 36.8 MW · exceeds the limit by 1.8 MW · in 2035"
    ],
    [
     "Shortfall, concentrate shortfall (not counted)",
-    "485.8 t/h; 1.0 t over the horizon"
+    "485.8 t/h · 1.0 t over the horizon (2027–2035)"
    ]
   ]
  },
@@ -1060,12 +1068,13 @@
    "grid_import_peak_by_period": null,
    "connection_check": "within",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "8,760 h"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "20.0 MW; peak import 10.0 MW, within the limit"
+    "20.0 MW · peak import 10.0 MW · within the limit"
    ]
   ]
  },
@@ -1201,12 +1210,13 @@
    },
    "connection_check": "exceeds",
    "grid_supply_counted": [],
-   "product_slacks": []
+   "product_slacks": [],
+   "horizon": "2027–2035"
   },
   "not_counted": [
    [
     "Grid connection (import limit, not counted)",
-    "20.0 MW; peak import 21.0 MW, EXCEEDS the limit in 2035"
+    "20.0 MW · peak import 21.0 MW · exceeds the limit by 1.0 MW · in 2035"
    ]
   ]
  },
@@ -1324,6 +1334,7 @@
      "grid_supply_counted": [
       "grid_gen is counted: bus grid also holds load campus"
      ],
+     "horizon": "2027–2035",
      "product_slacks": [
       {
        "name": "__shortfall_NH3 shortfall",
@@ -1366,15 +1377,15 @@
     "not_counted": [
      [
       "Grid connection (import limit, not counted)",
-      "55.0 MW; peak import 56.0 MW, EXCEEDS the limit in 2030, 2035"
+      "55.0 MW · peak import 56.0 MW · exceeds the limit by 1.0 MW · in 2030 and 2035"
      ],
      [
       "Shortfall, NH3 shortfall (not counted)",
-      "32.2 MW_NH3; 1,234.6 MWh_NH3 over the horizon"
+      "32.2 MW_NH3 · 1,234.6 MWh_NH3 over the horizon (2027–2035)"
      ],
      [
       "odd_role, named_only (not counted)",
-      "32.2 MW; -2.0 MWh over the horizon"
+      "32.2 MW · -2.0 MWh over the horizon (2027–2035)"
      ],
      [
       "Grid supply counted",
@@ -1395,7 +1406,7 @@
     "not_counted": [
      [
       "Grid connection (import limit, not counted)",
-      "40.0 MW; peak import 40.0 MW, within the limit"
+      "40.0 MW · peak import 40.0 MW · within the limit"
      ]
     ]
    },
@@ -1429,7 +1440,7 @@
     "not_counted": [
      [
       "Grid connection (import limit, not counted)",
-      "not established: the import link is extendable, so it fixes no limit"
+      "Not established: the import link is extendable, so it fixes no limit"
      ]
     ]
    },
@@ -1441,7 +1452,7 @@
     "not_counted": [
      [
       "Grid connection (import limit, not counted)",
-      "not established: no connection limit"
+      "Not established: the network sets no connection limit."
      ]
     ]
    },

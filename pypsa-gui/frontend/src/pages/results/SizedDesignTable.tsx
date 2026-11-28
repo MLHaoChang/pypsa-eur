@@ -6,7 +6,10 @@ import AssetName from '../../components/AssetName'
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { componentLabel } from '../../utils/componentLabels'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { useState } from 'react'
 import { notCountedRows } from './notCounted'
+
+const SLACK_FOLD = 5
 
 // A solver's -0 or 1e-9 reads 0, never "-0".
 const num = (v: number): string =>
@@ -90,6 +93,14 @@ export function SizedDesignTable({ report, mode, testId }: {
   const units = heldUnits(flow?.sections?.find(x => x.section === 'assets')?.holds)
   const section = report?.sections?.sizing
   const left = section?.status === 'ok' ? notCountedRows(section.payload) : null
+  const [showAll, setShowAll] = useState(false)
+  // More than SLACK_FOLD shortfall / buy-in rows fold behind "Show all" (UX 34).
+  const slackIdx = (left ?? []).flatMap(([label], i) => (label.endsWith('(not counted)') ? [i] : []))
+  const hidden = new Set(showAll || slackIdx.length <= SLACK_FOLD ? [] : slackIdx.slice(SLACK_FOLD))
+  const shownLeft = (left ?? []).filter((_, i) => !hidden.has(i))
+  const hiddenSlacks = hidden.size
+  const connectionExceeds = (section?.payload as { connection_check?: unknown } | undefined)
+    ?.connection_check === 'exceeds'
   if (rows.length === 0 && !left) return null
   // The row's own unit (the report prints the same); a report stored before
   // rows carried one falls back to section 5's.
@@ -144,15 +155,26 @@ export function SizedDesignTable({ report, mode, testId }: {
           </span>
           <table className={`w-full ${guided ? 'text-[12px]' : 'text-[10px]'}`}>
             <tbody>
-              {left.map(([label, value], i) => (
-                <tr key={`${label}-${i}`} data-testid={`${testId}-not-counted-${i}`}
-                  className="border-t border-border/50 align-top">
-                  <td className={cell}>{label}</td>
-                  <td className={`${cell} text-right font-mono`}>{value}</td>
-                </tr>
-              ))}
+              {shownLeft.map(([label, value], i) => {
+                // The over-limit verdict is the payload's, in words and in warn colour.
+                const warn = i === 0 && connectionExceeds
+                return (
+                  <tr key={`${label}-${i}`} data-testid={`${testId}-not-counted-${i}`}
+                    className="border-t border-border/50 align-top">
+                    <td className={cell}>{label}</td>
+                    <td className={`${cell} text-right font-mono${warn ? ' text-warn' : ''}`}>{value}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+          {hiddenSlacks > 0 && (
+            <button type="button" data-testid={`${testId}-not-counted-more`}
+              className="self-start text-[10px] text-accent hover:underline"
+              onClick={() => setShowAll(true)}>
+              ({hiddenSlacks} more) Show all
+            </button>
+          )}
         </div>
       )}
     </div>

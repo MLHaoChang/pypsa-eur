@@ -5,11 +5,11 @@
 // (`backend/tests/test_sized_design_parity.py` checks the report side and
 // rebuilds it).
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { SizedDesignTable } from './SizedDesignTable'
 import fixture from './__fixtures__/sized_design_parity.json'
-import { fmt1 } from './notCounted'
+import { GRID_ROW as GRID, fmt1 } from './notCounted'
 
 // No section 5 rows: each sized row carries its own unit.
 vi.mock('../../hooks/useProjectFlow', () => ({ useProjectFlow: () => ({ flow: null }) }))
@@ -111,3 +111,40 @@ describe('the not-counted rows match the report on every edge case', () => {
     expect(fmt1(Number.NaN, 'MW')).toBe('not established')
   })
 })
+
+describe('the not-counted block reads at a glance (UX 34)', () => {
+  const slack = (i: number) => ({ name: `__lost_${i}`, process_role: 'shortfall', carrier: `P${i}`,
+    p_nom: 1, energy: 2, unit: 't/h', energy_unit: 't' })
+  const base = { grid_connection_mw: 40, grid_import_peak_mw: 20, connection_check: 'within' }
+
+  it('warn-colours the connection row only when it exceeds the limit, with the word shown', () => {
+    render(<SizedDesignTable testId="t" mode="guided"
+      report={report([], { ...base, grid_import_peak_mw: 42.8, connection_check: 'exceeds' })} />)
+    const value = screen.getByTestId('t-not-counted-0').querySelectorAll('td')[1]
+    expect(value.className).toContain('text-warn')
+    expect(value.textContent).toBe('40.0 MW · peak import 42.8 MW · exceeds the limit by 2.8 MW')
+    cleanup()
+    render(<SizedDesignTable testId="t" mode="guided" report={report([], base)} />)
+    expect(screen.getByTestId('t-not-counted-0').querySelectorAll('td')[1].className).not.toContain('text-warn')
+  })
+
+  it('folds more than five shortfall rows behind "Show all", keeping the rest', () => {
+    const p = { ...base, product_slacks: [1, 2, 3, 4, 5, 6, 7].map(slack),
+      grid_supply_counted: ['g is counted: bus grid also holds load L'], horizon: '8,760 h' }
+    render(<SizedDesignTable testId="t" mode="expert" report={report([], p)} />)
+    const labels = () => leftShown()?.map(r => r[0]) ?? []
+    expect(labels()).toEqual([GRID, ...[1, 2, 3, 4, 5].map(i => `Shortfall, P${i} (not counted)`), 'Grid supply counted'])
+    fireEvent.click(screen.getByTestId('t-not-counted-more'))
+    expect(screen.getByTestId('t').textContent).not.toContain('Show all')
+    expect(labels()).toHaveLength(9)
+    expect(leftShown()?.[7][1]).toBe('1.0 t/h · 2.0 t over the horizon (8,760 h)')
+  })
+
+  it('five shortfall rows show without a fold', () => {
+    render(<SizedDesignTable testId="t" mode="guided"
+      report={report([], { ...base, product_slacks: [1, 2, 3, 4, 5].map(slack) })} />)
+    expect(screen.queryByTestId('t-not-counted-more')).toBeNull()
+    expect(leftShown()).toHaveLength(6)
+  })
+})
+
