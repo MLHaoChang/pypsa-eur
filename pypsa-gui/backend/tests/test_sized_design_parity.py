@@ -569,16 +569,29 @@ def test_slack_units_are_the_payloads_and_the_horizon_is_named():
     )
 
 
-@pytest.mark.parametrize(
-    "tid,words", [("eh_ammonia_staged", "2027–2035"), ("eh_datacenter", "8,760 h")]
-)
-def test_the_horizon_is_the_networks(tid, words):
-    n = _build(tid)
-    if len(n.investment_periods):
-        words = f"{int(n.investment_periods[0])}–{int(n.investment_periods[-1])}"
-    else:
-        words = f"{float(n.snapshot_weightings.generators.sum()):,.0f} h"
-    assert R.sizing_summary_from_network(n)["horizon"] == words
+#: Each template's horizon in words, written out (GK A 41 H1): a staged plan
+#: names its first and last period, a single-period one its weighted hours.
+HORIZONS = {
+    "eh_datacenter": "8,760 h",
+    "eh_datacenter_staged": "2027–2035",
+    "eh_h2_hub": "8,760 h",
+    "eh_microgrid": "8,760 h",
+    "eh_h2_hub_staged": "2027–2035",
+    "eh_microgrid_staged": "2027–2035",
+    "eh_ammonia_staged": "2027–2035",
+    "eh_concentrator_staged": "2027–2035",
+    "eh_ipp_hybrid": "8,760 h",
+    "eh_site": "2027–2035",
+}
+
+
+def test_every_template_has_a_written_horizon():
+    assert set(HORIZONS) == set(TEMPLATES)
+
+
+@pytest.mark.parametrize("tid", TEMPLATES)
+def test_the_horizon_is_the_networks(tid):
+    assert R.sizing_summary_from_network(_build(tid))["horizon"] == HORIZONS[tid]
 
 
 def test_the_no_request_refusal_names_no_internal_key_and_says_what_to_do():

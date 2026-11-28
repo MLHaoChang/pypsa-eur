@@ -532,7 +532,9 @@ def _export_only(n, link: str, bus: str) -> bool:
     """A Link that only delivers INTO ``bus``: an export to the grid, which
     carries no grid power into the site. ``bus`` is its ``bus1`` and on no
     other port, and it never reverses or draws: ``p_min_pu`` not below 0 and
-    ``efficiency`` above 0, static and in their series (GK A 33)."""
+    ``efficiency`` above 0, static and in their series (GK A 33). Called only
+    for a Link that touches ``bus`` (`site_equipment_on`), so a Link with
+    ``bus`` on no port never reaches the ``bus1`` test."""
     row = n.links.loc[link]
     ports = [c for c in n.links.columns if c.startswith("bus") and c[3:].isdigit()]
     if str(row["bus1"]) != bus or any(
