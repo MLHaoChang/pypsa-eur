@@ -104,7 +104,7 @@ export default function DcArchitectureSection({ name }: { name: string }) {
       <PageSection
         title={ARCH_FIELD}
         hint={<span data-testid="dc-architecture-own">
-          {ARCH_LABEL[own.arch]} (set when the project is created){!own.set && <>{' '}<Assumed /></>}
+          {ARCH_LABEL[own.arch]} (stored for this project){!own.set && <>{' '}<Assumed /></>}
         </span>}
         right={<Btn onClick={() => compare.mutate()} disabled={compare.isPending}>
           <span data-testid="dc-architecture-compare">{compare.isPending ? 'Comparing…' : 'Compare'}</span>

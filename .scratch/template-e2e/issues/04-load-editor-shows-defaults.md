@@ -3,7 +3,7 @@
 
 # 04 — The load editor shows profile-generator defaults, not the load; non-electric loads get MW; DC load inputs are creation-only
 
-Status: partly done (load editor opens on the load's shape and peak, peak in the bus unit; DC fields editable after creation open, asked of the coordinator)
+Status: done (slice 1 #2128: load editor opens on the load's shape and peak in the bus unit; slice 2 #2136: PUT dc-load; slice 3: the fields in Guided and Expert; open follow-up: AddForm labels on a tonne bus)
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk (after #1565)
 Size: M
 Gated: UX
@@ -26,3 +26,5 @@ Journey fit: set up site (section 4) → readiness → results. Peaks per period
 
 - Follow-up (UX 34, not blocking): the AddForm Demand and Energy capacity labels do not yet follow a tonne bus's unit.
 - Shots (harness render of LoadSeriesEditor with stubbed API): .scratch/template-e2e/shots/04-load-editor-{tonne-guided,tonne-expert,mw-guided,nh3-guided}.small.png
+
+- DC fields UI: PUE and critical share on the it_load panel (Guided drawer and Expert share LoadPanel); backup mode and architecture in section 5 (Guided) and the Expert Grid study (architecture beside the existing backup mode). Shots: .scratch/template-e2e/shots/04-dc-fields-{guided,pue-invalid}.small.png.

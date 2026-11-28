@@ -151,8 +151,8 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     return (
       <div className="text-xs" data-testid="load-series-editor">
         <p className="text-muted" data-testid="dc-owned-note">
-          This load follows the data-centre set-up{detail ? ` (${detail})` : ''}. The IT load and PUE are fixed when the project is
-          created and cannot be changed afterwards, so a profile cannot replace them.
+          This load follows the data-centre set-up{detail ? ` (${detail})` : ''}. Change the PUE and critical share on the
+          IT load; a profile cannot replace this load. The IT load itself is fixed when the project is created.
         </p>
         {dcBlock?.ambient && <p className="mt-1 text-muted" data-testid="dc-ambient-basis">{ambientBasisText(dcBlock.ambient)}</p>}
       </div>
