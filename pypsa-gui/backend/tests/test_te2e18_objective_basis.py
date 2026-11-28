@@ -417,3 +417,50 @@ def test_a_malformed_stamp_reads_unknown(raw, monkeypatch):
     assert solve_discount(n) == "unknown"
     n.meta[SOLVE_STRATEGY_META] = "sideways"
     assert _status_with(monkeypatch, n) == ("unknown", None)
+
+
+def test_the_stamp_takes_the_resolved_sclopf_flag(monkeypatch, reset_backend):
+    """GK B M9: set-up decides the stamp's strategy on the SCLOPF flag the solve resolved, not the
+    config's. Today the two never differ on a run that starts: the pre-flight refuses SCLOPF with
+    no branch (`sclopf_no_branches`) and rolling with SCLOPF (`rolling_with_sclopf`). With those
+    checks stubbed, a rolling single-period solve whose SCLOPF falls back to plain LOPF runs
+    rolling, and the stamp must say so: the wiring holds if the pre-flight ever loosens."""
+    from routers.projects import _solver_config_from_dict
+    from services import solver_service as ss
+    from services.pypsa_service import PyPSAService
+    from services.solver.assumptions import SOLVE_BASIS_CAPTURED
+
+    n = T.BUILDERS["eh_h2_hub"]()
+    cfg = dataclasses.replace(
+        _solver_config_from_dict(T.solver_config("eh_h2_hub")),
+        sclopf=True,
+        solve_strategy="rolling",
+    )
+    assert not cfg.multi_investment_periods
+    monkeypatch.setattr(ss, "resolve_branch_outages", lambda *_a, **_k: [])
+    monkeypatch.setattr(ss, "validate_for_run", lambda *_a, **_k: [])
+    seen = {}
+    real = ss._apply_modelling_assumptions
+
+    def spy(*a, **k):
+        seen["sclopf"] = k.get("sclopf", "not passed")
+        restore, captured = real(*a, **k)
+        seen["strategy"] = captured[SOLVE_BASIS_CAPTURED]["strategy"]
+        return restore, captured
+
+    def stop(*_a, **_k):
+        raise RuntimeError("stop after set-up")
+
+    monkeypatch.setattr(ss, "_apply_modelling_assumptions", spy)
+    monkeypatch.setattr(ss._operational, "fallback_refusal", stop)
+    PyPSAService.set_network(n)
+    out = ss.run_simulation(
+        cfg,
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **kw: None,
+    )
+    assert out == ("error", "stop after set-up")
+    assert seen == {"sclopf": False, "strategy": "rolling"}
