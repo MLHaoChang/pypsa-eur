@@ -29,6 +29,13 @@ _SUCCESS_STATUSES = {"ok", "optimal"}
 # Matched against a lowercased haystack built from condition (+ optional detail).
 _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
     (
+        ("site_location_missing",),
+        "site_location_missing",
+        "The site has no location",
+        "Nothing was solved: the site has no location. Set its latitude and "
+        "longitude, then run again.",
+    ),
+    (
         ("operational_window_failed",),
         "operational_window_failed",
         "A window of the operational run did not solve",

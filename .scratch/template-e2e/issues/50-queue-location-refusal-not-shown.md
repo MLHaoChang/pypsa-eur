@@ -3,7 +3,7 @@
 
 # 50 — "Run the solve" does not show the solve queue's location refusal
 
-Status: ready-for-agent
+Status: in-review (PR open)
 Owner: unassigned
 Size: S
 Follows: 48 (PR #2099; raised by GK B3 (7) as a non-blocking follow-up)
