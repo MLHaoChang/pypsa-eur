@@ -523,6 +523,78 @@ def _cells(assets: list[dict]) -> tuple[dict, dict]:
     return {r[-4]: r[-2] for r in rows}, {r[-4]: r[-1] for r in rows}
 
 
+#: The payload keys the UI's not-counted block reads (``notCounted.ts``).
+_LEFT_KEYS = ("grid_connection_mw", "grid_connection_refusal", "grid_import_peak_mw",
+              "grid_import_peak_by_period", "connection_check", "grid_supply_counted",
+              "product_slacks")
+
+
+def _left_out(payload: dict) -> list[list[str]] | None:
+    """The report's sizing rows after Total: what is not installed capacity.
+    None for a payload stored before the connection was read apart (S4)."""
+    if E.NEW_SIZING_KEY not in payload:
+        return None
+    rows = [list(r) for r in E._t_sizing(payload).rows]
+    return rows[[r[0] for r in rows].index("Total") + 1:]
+
+
+def _flowed_payload(tid: str) -> dict:
+    """A template's payload with a flow on it: each import Link carries half
+    its limit, the last period (staged) twice that, and each product slack
+    delivers 1 in its first snapshot, so the connection check and the slack
+    rows have figures to show."""
+    n = _fake_solve(_build(tid))
+    gi = _grid_import(n)
+    flow = pd.DataFrame({x: 0.5 * float(gi.at[x, "p_nom"]) for x in gi.index}, index=n.snapshots)
+    if len(n.investment_periods) > 0:
+        last = n.snapshots.get_level_values(0) == n.investment_periods[-1]
+        flow.loc[last] = flow.loc[last] * 2.1
+    n.links_t.p0 = flow
+    roles = n.generators.get("process_role")
+    slack = list(roles.index[roles.isin(("buy_in", "shortfall"))]) if roles is not None else []
+    p = pd.DataFrame(0.0, index=n.snapshots, columns=slack)
+    if slack:
+        p.iloc[0] = 1.0
+    n.generators_t.p = p
+    payload = R.sizing_summary_from_network(n)
+    return {k: payload[k] for k in _LEFT_KEYS}
+
+
+def _slack(role, carrier, energy, unit="MW", energy_unit="MWh"):
+    return {"name": f"__{role}_{carrier}", "process_role": role, "carrier": carrier,
+            "p_nom": 32.25, "energy": energy, "unit": unit, "energy_unit": energy_unit}
+
+
+#: Connection and slack cases no template has (the fixture's ``_edge``): one
+#: period over by more than the tolerance and one within it, unbounded,
+#: refused with and without words, a counted grid supply, an unsolved slack
+#: and one that delivered nothing, a peak with no
+#: check, and an old payload.
+EDGE_SIZING = [
+    {"grid_connection_mw": 55.0, "grid_connection_refusal": None,
+     "grid_import_peak_mw": 56.0, "connection_check": "exceeds",
+     "grid_import_peak_by_period": {"2027": 55.0 + 0.9 * TOL, "2030": 56.0, "2035": 55.0 + 1.1 * TOL},
+     "grid_supply_counted": ["grid_gen is counted: bus grid also holds load campus"],
+     "product_slacks": [_slack("shortfall", "NH3 shortfall", 1234.56, "MW_NH3", "MWh_NH3"),
+                        _slack("buy_in", "NH3 import", 0.0), _slack("buy_in", "H2 import", None),
+                        {**_slack("odd_role", "", -2.0), "name": "named_only"}]},
+    {"grid_connection_mw": 40.0, "grid_connection_refusal": None,
+     "grid_import_peak_mw": 40.0 + 0.9 * TOL, "connection_check": "within",
+     "grid_import_peak_by_period": None, "grid_supply_counted": [], "product_slacks": []},
+    {"grid_connection_mw": None, "grid_connection_refusal": None,
+     "grid_import_peak_mw": None, "connection_check": "unbounded",
+     "grid_import_peak_by_period": None, "grid_supply_counted": [], "product_slacks": []},
+    {"grid_connection_mw": None,
+     "grid_connection_refusal": "the import link is extendable, so it fixes no limit",
+     "grid_import_peak_mw": None, "connection_check": None,
+     "grid_import_peak_by_period": None, "grid_supply_counted": [], "product_slacks": []},
+    {"grid_connection_mw": None, "connection_check": None},
+    {"grid_connection_mw": 1234.0, "grid_import_peak_mw": None, "connection_check": None},
+    {"grid_connection_mw": 40.0, "grid_import_peak_mw": 30.0, "connection_check": None},
+    {"by_carrier": {"gas": 20.0}, "total_p_nom_mw": 20.0},
+]
+
+
 def test_fixture_covers_every_template():
     assert set(json.loads(FIXTURE.read_text())) == set(TEMPLATES) | {"_edge"}
 
@@ -564,6 +636,41 @@ def test_report_built_cell_matches_the_ui_fixture(tid):
     assert payload["assets"] == case["assets"]
 
 
+@pytest.mark.parametrize("tid", TEMPLATES)
+def test_report_not_counted_rows_match_the_ui_fixture(tid):
+    """The report's rows after Total (the grid connection, a delivered
+    buy-in or shortfall) are the strings the frontend test pins for Guided
+    and Expert, from this template's own payload."""
+    case = json.loads(FIXTURE.read_text())[tid]
+    assert case["sizing"] == json.loads(json.dumps(_flowed_payload(tid)))
+    assert case["not_counted"] == _left_out(case["sizing"])
+    assert case["not_counted"][0][0] == GRID_ROW
+    periods = _build(tid).investment_periods
+    # The flow doubles in a staged template's last period, over its limit.
+    assert case["not_counted"][0][1].endswith(
+        f"EXCEEDS the limit in {periods[-1]}" if len(periods) else "within the limit")
+
+
+def test_edge_not_counted_rows_render_as_the_ui_fixture_pins_them():
+    cases = json.loads(FIXTURE.read_text())["_edge"]["sizing_cases"]
+    assert [c["sizing"] for c in cases] == json.loads(json.dumps(EDGE_SIZING))
+    got = [c["not_counted"] for c in cases]
+    assert got == [_left_out(c) for c in EDGE_SIZING]
+    assert got[0] == [
+        [GRID_ROW, "55.0 MW; peak import 56.0 MW, EXCEEDS the limit in 2030, 2035"],
+        ["Shortfall, NH3 shortfall (not counted)", "32.2 MW_NH3; 1,234.6 MWh_NH3 over the horizon"],
+        ["odd_role, named_only (not counted)", "32.2 MW; -2.0 MWh over the horizon"],
+        ["Grid supply counted", "grid_gen is counted: bus grid also holds load campus"],
+    ]
+    assert got[1] == [[GRID_ROW, "40.0 MW; peak import 40.0 MW, within the limit"]]
+    assert got[2][0][1].startswith("unbounded connection")
+    assert got[3] == [[GRID_ROW, "not established: the import link is extendable, so it fixes no limit"]]
+    assert got[4] == [[GRID_ROW, "not established: no connection limit"]]
+    assert got[5] == [[GRID_ROW, "1,234.0 MW"]]
+    assert got[6] == [[GRID_ROW, "40.0 MW"]]  # a peak with no check: no verdict
+    assert got[7] is None
+
+
 def _write_fixture() -> None:
     """Rebuild the fixture from the templates (``python -m
     tests.test_sized_design_parity`` from ``pypsa-gui/backend``)."""
@@ -571,9 +678,13 @@ def _write_fixture() -> None:
     for tid in TEMPLATES:
         _n, payload = _payload(tid)
         built, rng = _cells(payload["assets"])
-        out[tid] = {"assets": payload["assets"], "built": built, "range": rng}
+        sizing = _flowed_payload(tid)
+        out[tid] = {"assets": payload["assets"], "built": built, "range": rng,
+                    "sizing": sizing, "not_counted": _left_out(sizing)}
     built, rng = _cells(EDGE_ASSETS)
-    out["_edge"] = {"assets": EDGE_ASSETS, "built": built, "range": rng}
+    out["_edge"] = {"assets": EDGE_ASSETS, "built": built, "range": rng,
+                    "sizing_cases": [{"sizing": c, "not_counted": _left_out(c)}
+                                     for c in EDGE_SIZING]}
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n")
 

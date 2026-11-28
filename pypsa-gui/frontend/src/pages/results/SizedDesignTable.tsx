@@ -6,6 +6,7 @@ import AssetName from '../../components/AssetName'
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { componentLabel } from '../../utils/componentLabels'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { notCountedRows } from './notCounted'
 
 // A solver's -0 or 1e-9 reads 0, never "-0".
 const num = (v: number): string =>
@@ -87,7 +88,9 @@ export function SizedDesignTable({ report, mode, testId }: {
   // Section 5's rows carry each asset's unit from its bus (MW or t/h).
   const { flow } = useProjectFlow()
   const units = heldUnits(flow?.sections?.find(x => x.section === 'assets')?.holds)
-  if (rows.length === 0) return null
+  const section = report?.sections?.sizing
+  const left = section?.status === 'ok' ? notCountedRows(section.payload) : null
+  if (rows.length === 0 && !left) return null
   // The row's own unit (the report prints the same); a report stored before
   // rows carried one falls back to section 5's.
   const unitOf = (a: EhSizedAsset): SizeUnit =>
@@ -101,6 +104,7 @@ export function SizedDesignTable({ report, mode, testId }: {
         : 'text-[10px] font-semibold uppercase tracking-wide text-muted'}>
         Sized design
       </span>
+      {rows.length > 0 && (<>
       <div className="overflow-x-auto">
         <table className={`w-full ${guided ? 'text-[12px]' : 'text-[10px]'}`}>
           <thead className="text-muted">
@@ -129,6 +133,28 @@ export function SizedDesignTable({ report, mode, testId }: {
       <span className="text-[10px] text-muted">
         Sizes the reliability study chose for the assets marked “sized by the study”.
       </span>
+      </>)}
+      {left && (
+        // The report's own rows after its Total: never summed into installed
+        // capacity (issue template-e2e 20, GK A 33 S1–S3).
+        <div data-testid={`${testId}-not-counted`} className="mt-1 flex flex-col gap-0.5">
+          <span className={guided ? 'text-[11px] font-semibold text-text'
+            : 'text-[10px] font-semibold uppercase tracking-wide text-muted'}>
+            Not counted as installed capacity
+          </span>
+          <table className={`w-full ${guided ? 'text-[12px]' : 'text-[10px]'}`}>
+            <tbody>
+              {left.map(([label, value], i) => (
+                <tr key={`${label}-${i}`} data-testid={`${testId}-not-counted-${i}`}
+                  className="border-t border-border/50 align-top">
+                  <td className={cell}>{label}</td>
+                  <td className={`${cell} text-right font-mono`}>{value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
