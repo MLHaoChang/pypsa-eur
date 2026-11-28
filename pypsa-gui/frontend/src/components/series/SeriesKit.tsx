@@ -171,7 +171,7 @@ export function CurrentSeriesLine({
   return (
     <div className="flex items-center gap-2 text-[11px] mb-2" data-testid="current-series">
       <span className="text-muted">Current {fieldLabel(attribute)}:</span>
-      <span>{what}, {data.rows} h{data.refinements ? `, refined ×${data.refinements}` : ''}</span>
+      <span>{what}, {data.rows} h{data.refinements ? `, refined ×${data.refinements}` : ''}{data.peak != null ? `, peak ${Number(data.peak.toFixed(2))} ${data.unit ?? 'MW'}` : ''}</span>
       <Btn onClick={() => take.mutate()} disabled={take.isPending}><Wand2 size={12} /> Refine this series</Btn>
       {take.isError && <span className="text-red-600" data-testid="current-error">{errorText(take.error)}</span>}
     </div>

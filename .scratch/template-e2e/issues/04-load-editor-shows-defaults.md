@@ -3,7 +3,7 @@
 
 # 04 — The load editor shows profile-generator defaults, not the load; non-electric loads get MW; DC load inputs are creation-only
 
-Status: ready-for-agent
+Status: partly done (load editor opens on the load's shape and peak, peak in the bus unit; DC fields editable after creation open, asked of the coordinator)
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk (after #1565)
 Size: M
 Gated: UX

@@ -110,6 +110,15 @@ def test_an_upload_reads_as_measured():
     assert meta["provenance"] == "measured" and meta["source"] == "current"
 
 
+def test_a_load_series_states_its_peak_and_the_bus_unit():
+    n = _net()
+    n.buses.at["site", "unit"] = "t"
+    _user_ts[KEY] = pd.Series(5.0, index=n.snapshots)
+    _user_ts[KEY].iloc[3] = 7.5
+    cur = describe_current(_ctx(), *KEY)
+    assert cur["peak"] == 7.5 and cur["unit"] == "t/h"
+
+
 def test_no_current_series_is_refused():
     _net()
     assert describe_current(_ctx(), *KEY) == {"exists": False}

@@ -272,7 +272,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={gen.name} badge={gen.carrier}
-        meta={`${gen.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')}${gen.marginal_cost > 0 ? ` · MC ${gen.marginal_cost} €/MWh` : ''}${gen.p_nom_extendable ? ' · extendable' : ''}`}
+        meta={`${gen.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')}${gen.marginal_cost > 0 ? ` · Marginal cost ${gen.marginal_cost} €/MWh` : ''}${gen.p_nom_extendable ? ' · extendable' : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -785,7 +785,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
           ))}
           <Row
             label="Profile"
-            value={hasProfile ? `Loaded · ${profileMeta.has_profile ? profileMeta.rows : 0} pts` : 'Static p_set'}
+            value={hasProfile ? `Loaded · ${profileMeta.has_profile ? profileMeta.rows : 0} pts` : 'Fixed demand (no profile)'}
           />
         </Section>
         {showChart && hasProfile && (
@@ -845,7 +845,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
         <span className="text-xs text-muted">
           {hasProfile && profileMeta.has_profile
             ? `Profile loaded · ${profileMeta.rows} pts · peak ${profileMeta.peak?.toFixed(1)} ${fieldUnit(schema, 'p_set', 'MW')}`
-            : 'No profile — static p_set used'}
+            : 'No profile — the fixed demand is used'}
         </span>
       </div>
       <ExtrasSection
@@ -1333,12 +1333,12 @@ function AddForm({ bus, type, onClose }: { bus: string; type: AddType; onClose: 
           {allCarrierOpts.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
       </label>
-      {(type === 'Generator' || type === 'StorageUnit') && inp('p_nom (MW)', 'p_nom', '0', 'number')}
+      {(type === 'Generator' || type === 'StorageUnit') && inp('Capacity (MW)', 'p_nom', '0', 'number')}
       {type === 'Generator' && inp('Marginal cost (€/MWh)', 'mc', '0', 'number')}
       {type === 'Generator' && inp('Capital cost (€/MW/yr)', 'cc', '0', 'number')}
-      {type === 'Load' && inp('p_set (MW)', 'p_set', '0', 'number')}
+      {type === 'Load' && inp('Demand (MW)', 'p_set', '0', 'number')}
       {type === 'StorageUnit' && inp('Max hours (h)', 'max_hours', '6', 'number')}
-      {type === 'Store' && inp('e_nom (MWh)', 'e_nom', '0', 'number')}
+      {type === 'Store' && inp('Energy capacity (MWh)', 'e_nom', '0', 'number')}
       {type === 'Line' && (
         <>
           <label className="flex flex-col gap-0.5 mb-1.5">
@@ -1348,7 +1348,7 @@ function AddForm({ bus, type, onClose }: { bus: string; type: AddType; onClose: 
               {(buses as Bus[]).filter((b: Bus) => b.name !== bus).map((b: Bus) => <option key={b.name} value={b.name}>{b.name}</option>)}
             </select>
           </label>
-          {inp('s_nom (MW)', 's_nom', '100', 'number')}
+          {inp('Rating (MW)', 's_nom', '100', 'number')}
           {inp('Length (km)', 'length', '1', 'number')}
           {inp('R (pu)', 'r', '0.01', 'number')}
           {inp('X (pu)', 'x', '0.1', 'number')}
@@ -1880,8 +1880,8 @@ export function TransformerPanel({ name }: { name: string }) {
         {tr.type && <Row label="Type" value={tr.type} />}
       </Section>
       <Section title="Voltage step">
-        <Row label="v_nom₀ (HV)" value={tr.v_nom_0 ?? null} unit=" kV" />
-        <Row label="v_nom₁ (LV)" value={tr.v_nom_1 ?? null} unit=" kV" />
+        <Row label="Voltage, HV side" value={tr.v_nom_0 ?? null} unit=" kV" />
+        <Row label="Voltage, LV side" value={tr.v_nom_1 ?? null} unit=" kV" />
       </Section>
       {editing ? (
         <Section title="Edit Parameters">

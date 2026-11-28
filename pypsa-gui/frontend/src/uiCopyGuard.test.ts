@@ -274,12 +274,6 @@ const read = (rel: string) => fs.readFileSync(path.join(SRC, rel), 'utf8')
  * changed too, in review; a row removed from the JSON is removed here.
  */
 const PINNED_ALLOW_KEYS = [
-  'layout/PropertiesPanel.tsx|MC',
-  'layout/PropertiesPanel.tsx|p_set',
-  'layout/PropertiesPanel.tsx|p_nom',
-  'layout/PropertiesPanel.tsx|e_nom',
-  'layout/PropertiesPanel.tsx|s_nom',
-  'layout/PropertiesPanel.tsx|v_nom',
   'pages/SolverSettings.tsx|p_nom',
   'pages/SolverSettings.tsx|committable=',
   'pages/SolverSettings.tsx|co2_emissions',
