@@ -59,13 +59,20 @@ export function currencyInScaleOf(ref: number | null | undefined): (eur: number 
 }
 
 /** Guided's name for the run's figure, and its basis line (UX 34 on #2140): Guided's own cost words, never
- *  "solve", "LP" or "objective". A discounted multi-period figure is the plan's cost; a single period's is a
- *  year's. */
+ *  "solve", "LP" or "objective". A discounted multi-period figure is the plan's cost (its weights are present
+ *  value × years); a single period's is a year's. */
 export function guidedCostWords(status: Basis | null | undefined, multiPeriod: boolean): { label: string; basis?: string } {
+  // A run recorded before its basis was: no basis is claimed (GK B3 on #2140).
+  if (status?.objective_basis === 'unknown') {
+    return { label: multiPeriod ? 'Cost over the periods' : 'Yearly cost',
+      basis: 'how it was counted was not recorded; run the optimisation again to see it' }
+  }
   if (status?.objective_discounted_to != null) {
     return { label: 'Cost over the plan (discounted)', basis: `discounted to ${status.objective_discounted_to}` }
   }
-  if (multiPeriod) return { label: 'Cost over the plan', basis: 'summed over the periods, not discounted' }
+  // Not discounted, the periods count with whatever weights the network carries (one year each unless set),
+  // so the figure is not claimed to be the plan's cost (GK B3 on #2140).
+  if (multiPeriod) return { label: 'Cost over the periods', basis: 'summed over the periods, not discounted' }
   return { label: 'Yearly cost' }
 }
 
@@ -124,15 +131,15 @@ export function objectiveGapReasons(
 }
 
 /** The existing assets' fixed cost a single-period LP objective carries as its constant: the part of
- *  Expert's figure Guided's yearly cost leaves out. Null when there is none to name. */
+ *  Expert's figure Guided's yearly cost leaves out. Only the server's existing-asset part, never the whole
+ *  constant, which a curtailment cost also adds to (GK B3 on #2140). Null when there is none to name. */
 export function objectiveConstant(dec: ObjectiveDecomposition | null | undefined): number | null {
-  const c = dec?.n_objective_constant
+  const c = dec?.existing_asset_constant
   const total = dec?.cost_breakdown_total
   return total != null && big(c, total) ? c : null
 }
 
 type ConnectionSection = Pick<FlowSection, 'state' | 'connection_limit'>
-
 
 /**
  * Key capacities' line for the grid supply it does not list (template-e2e 18), read from the flow's connection

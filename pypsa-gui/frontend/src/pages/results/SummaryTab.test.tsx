@@ -465,7 +465,7 @@ describe('the LP objective beside the total system cost (template-e2e 18)', () =
       { id: 'system_cost', value: 9.022e6, unit: 'currency', state: 'ready', reason: null, formula_id: null, detail: null } ] })
     api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 9.022e6,
       solve_time: 1, objective_basis: 'lp_objective', objective_discounted_to: null })
-    api.getObjectiveDecomposition.mockResolvedValue({ ...DEC, n_objective: 7.609e6, n_objective_constant: 1.413e6,
+    api.getObjectiveDecomposition.mockResolvedValue({ ...DEC, n_objective: 7.609e6, n_objective_constant: 1.413e6, existing_asset_constant: 1.413e6,
       lp_total: 9.022e6, cost_breakdown_total: 9.022e6, nonextendable_fixed_cost_eur: 0,
       period_weighting_adjustment_eur: 0, discount: null })
     renderTab()

@@ -55,6 +55,9 @@ export const getEhStudyWhy = (figure: EhStudyWhyFigure): Promise<EhStudyWhy> =>
 export interface ObjectiveDecomposition {
   n_objective: number | null
   n_objective_constant: number | null
+  /** The part of the constant that is existing assets' fixed cost; null when it cannot be told (a
+   *  curtailment-cost run whose baseline did not survive a reload). */
+  existing_asset_constant?: number | null
   lp_total: number | null
   cost_breakdown_total: number | null
   gap_eur: number | null

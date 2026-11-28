@@ -171,6 +171,30 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
     }
 
 
+def _existing_asset_constant(n, constant):
+    """The part of the objective constant that is existing assets' fixed cost, or None when it cannot be told.
+
+    The curtailment-cost wrapper (``services/solver/objective.py`` ``_wrap_with_curtailment_cost``) adds an
+    implied capacity term for each fixed-size generator with a curtailment cost on top of PyPSA's own
+    constant, so the constant is then ``baseline + implied`` and only the baseline is the assets' fixed cost
+    (GK B3 on #2140). With no such generator the whole constant is. With one, the baseline is known only
+    when this process captured it before the solve; it does not survive a reload.
+    """
+    if constant is None:
+        return None
+    try:
+        gens = n.generators
+        if "curtailment_cost" not in gens.columns:
+            return float(constant)
+        fixed = ~gens["p_nom_extendable"].astype(bool)
+        if not bool(((gens["curtailment_cost"].fillna(0.0) > 0.0) & fixed).any()):
+            return float(constant)
+    except Exception:
+        return None
+    baseline = getattr(n, "_baseline_objective_constant", None)
+    return float(baseline) if baseline is not None else None
+
+
 def compute_objective_decomposition(n, cost_breakdown, cfg=None):
     """
     Decompose ``n.objective + n.objective_constant`` into its LP-side
@@ -239,6 +263,7 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
         out["baseline_objective_constant"] = float(getattr(n, "_baseline_objective_constant", 0.0) or 0.0)
     except Exception:
         pass
+    out["existing_asset_constant"] = _existing_asset_constant(n, out["n_objective_constant"])
     try:
         out["pypsa_gui_objective_scale"] = float(getattr(n, "_pypsa_gui_objective_scale", 1.0) or 1.0)
     except Exception:

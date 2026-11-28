@@ -986,14 +986,16 @@ export default function AppHeader() {
   useEffect(() => {
     if (runSolveRequest === seenRunRequest.current) return
     seenRunRequest.current = runSolveRequest
-    if (jobRunning || isRunning || jobQueued) return
+    // A request while any run is going starts nothing and stops nothing: the handler's first branch aborts
+    // a running study, so a running study is checked here too (GK B3 on #2140).
+    if (jobRunning || isRunning || jobQueued || studyRunning) return
     // A study has no network to solve; say where its run is (pio/08).
     if (isStudy) {
       toast('A Study runs from Run study, in its Planning → dynamics panel.')
       return
     }
     void runHandlerRef.current({ dispatch: useUIStore.getState().runSolveDispatch })
-  }, [runSolveRequest, jobRunning, isRunning, jobQueued, isStudy])
+  }, [runSolveRequest, jobRunning, isRunning, jobQueued, studyRunning, isStudy])
 
   return (
     <header data-no-panel-close className="h-11 max-xl:h-auto max-xl:min-h-11 max-xl:flex-wrap max-xl:gap-y-1 max-xl:py-1 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">

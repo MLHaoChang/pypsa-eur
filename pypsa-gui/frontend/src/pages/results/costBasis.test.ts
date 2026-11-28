@@ -88,11 +88,19 @@ describe('objectiveGapReasons', () => {
 
 describe('objectiveConstant', () => {
   it("is the existing assets' fixed cost a single-period objective carries (H2 hub: Guided 7.61 M, Expert 9.02 M)", () => {
-    const flat = dec({ n_objective: 7.609e6, n_objective_constant: 1.413e6, lp_total: 9.022e6,
+    const flat = dec({ n_objective: 7.609e6, n_objective_constant: 1.413e6, existing_asset_constant: 1.413e6, lp_total: 9.022e6,
       cost_breakdown_total: 9.022e6, discount: null, nonextendable_fixed_cost_eur: 0, period_weighting_adjustment_eur: 0 })
     expect(objectiveConstant(flat)).toBe(1.413e6)
     expect(objectiveGapReasons(flat, m)).toEqual([])
     expect(objectiveConstant(dec())).toBeNull()
+  })
+
+  it('names only the existing-asset part a curtailment cost leaves, never the whole constant (GK B3 on #2140)', () => {
+    const base = { n_objective: 7.609e6, lp_total: 9.522e6, cost_breakdown_total: 9.022e6, discount: null,
+      nonextendable_fixed_cost_eur: 0, period_weighting_adjustment_eur: 0 }
+    expect(objectiveConstant(dec({ ...base, n_objective_constant: 1.913e6, existing_asset_constant: 1.413e6 }))).toBe(1.413e6)
+    // A reloaded curtailment-cost run: the part cannot be told, so nothing is named.
+    expect(objectiveConstant(dec({ ...base, n_objective_constant: 1.913e6, existing_asset_constant: null }))).toBeNull()
   })
 })
 
@@ -140,8 +148,17 @@ describe("Guided's cost words (UX 34 on #2140)", () => {
   it('names a discounted plan, an undiscounted plan and a year, never solve, LP or objective', () => {
     expect(guidedCostWords({ objective_basis: 'lp_objective', objective_discounted_to: 2027 }, true))
       .toEqual({ label: 'Cost over the plan (discounted)', basis: 'discounted to 2027' })
-    expect(guidedCostWords({ objective_basis: 'system_cost', objective_discounted_to: null }, true).label).toBe('Cost over the plan')
+    expect(guidedCostWords({ objective_basis: 'system_cost', objective_discounted_to: null }, true).label).toBe('Cost over the periods')
     expect(guidedCostWords({ objective_basis: 'lp_objective', objective_discounted_to: null }, false)).toEqual({ label: 'Yearly cost' })
     expect(guidedCostWords(null, false).label).toBe('Yearly cost')
+  })
+
+  it('claims no basis for a run recorded before its basis was (GK B3 on #2140)', () => {
+    for (const multi of [true, false]) {
+      const w = guidedCostWords({ objective_basis: 'unknown', objective_discounted_to: null }, multi)
+      expect(w.label).toBe(multi ? 'Cost over the periods' : 'Yearly cost')
+      expect(w.basis).toBe('how it was counted was not recorded; run the optimisation again to see it')
+      expect(`${w.label} ${w.basis}`).not.toMatch(/discounted|summed|solve|LP|objective/)
+    }
   })
 })

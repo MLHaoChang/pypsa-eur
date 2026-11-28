@@ -49,7 +49,7 @@ describe('StatusBar objective (control-strategy 07)', () => {
     renderBar()
     await vi.waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
     await new Promise(r => setTimeout(r, 0))
-    expect(screen.getByText('LP objective: —')).toBeTruthy()
+    expect(await screen.findByText('LP objective: —')).toBeTruthy()
   })
 
   it('reads a dash when nothing is solved', async () => {
@@ -57,7 +57,7 @@ describe('StatusBar objective (control-strategy 07)', () => {
       { status: 'idle', objective: null, dispatch: 'none' } as never)
     renderBar()
     await vi.waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
-    expect(screen.getByText('LP objective: —')).toBeTruthy()
+    expect(await screen.findByText('LP objective: —')).toBeTruthy()
   })
 
   // Template-e2e 18: the figure names its basis, as Results › Summary does.
@@ -78,6 +78,14 @@ describe('StatusBar objective (control-strategy 07)', () => {
     } as never)
     renderBar()
     expect(await screen.findByText('System cost: € 190 m')).toBeTruthy()
+    expect(screen.queryByText(/LP objective/)).toBeNull()
+  })
+
+  it('before the status is read, names the store\'s figure plainly, never "LP objective" (GK B3 on #2140)', async () => {
+    vi.mocked(simulationApi.getStatus).mockReturnValue(new Promise(() => {}) as never)
+    useSimulationStore.setState({ objective: 194866050 })
+    renderBar()
+    expect(await screen.findByText('Objective: € 190 m')).toBeTruthy()
     expect(screen.queryByText(/LP objective/)).toBeNull()
   })
 })

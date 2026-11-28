@@ -507,3 +507,56 @@ def test_no_basis_when_the_network_cannot_be_read(monkeypatch):
     monkeypatch.setitem(simulation._state, "objective", 1.0e6)
     st = simulation.get_status()
     assert (st["objective_basis"], st["objective_discounted_to"]) == (None, None)
+
+
+# GK B3 on #2140: the Summary names the constant "existing assets' fixed cost". With a curtailment cost on a
+# fixed-size generator the constant also carries the wrapper's implied capacity term, which is not that.
+def _curtailment_network(curtailment_cost: float):
+    import pandas as pd
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(3))
+    n.add("Bus", "b")
+    n.add("Load", "d", bus="b", p_set=4.0)
+    n.add("Generator", "pv", bus="b", p_nom=10.0, p_max_pu=[1.0, 0.5, 0.2], marginal_cost=0.0)
+    n.add("Generator", "gas", bus="b", p_nom=2.0, p_nom_extendable=True, capital_cost=50.0, marginal_cost=30.0)
+    n.generators["curtailment_cost"] = 0.0
+    n.generators.loc["pv", "curtailment_cost"] = curtailment_cost
+    return n
+
+
+def _solve_with_wrapper(n):
+    from services.solver.objective import _wrap_with_curtailment_cost
+
+    fn = _wrap_with_curtailment_cost(n, None)
+    n.optimize(solver_name="highs", extra_functionality=fn)
+
+
+def test_with_a_curtailment_cost_only_the_baseline_is_existing_assets_fixed_cost():
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    n = _curtailment_network(5.0)
+    _solve_with_wrapper(n)
+    dec = compute_objective_decomposition(n, None)
+    baseline = n._baseline_objective_constant
+    assert dec["n_objective_constant"] > baseline + 1.0, "the wrapper added its implied capacity term"
+    assert dec["existing_asset_constant"] == pytest.approx(baseline)
+
+
+def test_after_a_reload_the_curtailment_baseline_is_unknown_never_the_whole_constant():
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    n = _curtailment_network(5.0)
+    _solve_with_wrapper(n)
+    del n._baseline_objective_constant  # a reloaded network carries no baseline
+    assert compute_objective_decomposition(n, None)["existing_asset_constant"] is None
+
+
+def test_with_no_curtailment_cost_the_whole_constant_is_existing_assets_fixed_cost():
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    n = _curtailment_network(0.0)
+    _solve_with_wrapper(n)
+    dec = compute_objective_decomposition(n, None)
+    assert dec["existing_asset_constant"] == pytest.approx(dec["n_objective_constant"])

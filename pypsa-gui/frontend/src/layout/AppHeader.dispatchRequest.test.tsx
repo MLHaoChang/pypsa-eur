@@ -9,6 +9,7 @@ import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AppHeader, { SolvedObjective } from './AppHeader'
+import { useProjectRun } from '../hooks/useProjectRun'
 import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
 import { simulationApi } from '../api/simulation'
@@ -46,6 +47,12 @@ vi.mock('../api/simulation', async (orig) => ({
   createLogStream: vi.fn(() => () => {}),
 }))
 vi.mock('../api/projects', () => ({ projectsApi: { list: vi.fn().mockResolvedValue([]) } }))
+vi.mock('../hooks/useProjectRun', () => ({ useProjectRun: vi.fn(() => null) }))
+const studyAbort = vi.fn()
+vi.mock('../hooks/useStudyAbort', async (orig) => ({
+  ...(await orig<typeof import('../hooks/useStudyAbort')>()),
+  useStudyAbort: () => ({ abort: { mutate: studyAbort }, aborting: false }),
+}))
 vi.mock('../auth/AuthModeProvider', () => ({
   useAuthMode: () => ({ ready: true, authEnabled: false, enableAuth: () => {} }),
 }))
@@ -65,6 +72,8 @@ function wrap(node: React.ReactNode) {
 beforeEach(() => {
   enqueue.mockClear()
   studyRun.mockClear()
+  studyAbort.mockClear()
+  vi.mocked(useProjectRun).mockReturnValue(null)
   useUIStore.setState({ currentProject: 'demo', projectName: 'demo', uiMode: 'expert' })
   useUIStore.getState().setLockState(WRITABLE)
   useUIStore.getState().setSolvingReadOnly(false)
@@ -76,6 +85,19 @@ describe('AppHeader — Expert with a study', () => {
     await act(async () => { useUIStore.getState().requestDispatchSolve() })
     await vi.waitFor(() => expect(enqueue).toHaveBeenCalledWith('demo'))
     expect(studyRun).not.toHaveBeenCalled()
+  })
+
+  it('a request while the study runs starts nothing and aborts nothing (GK B3 on #2140)', async () => {
+    vi.mocked(useProjectRun).mockReturnValue(
+      { name: 'Reliability study', stage: 'Studying', steps: '', startedAt: null, jobId: null, queued: false } as never)
+    wrap(<AppHeader />)
+    await act(async () => { useUIStore.getState().requestDispatchSolve() })
+    await act(async () => { useUIStore.getState().requestRunSolve() })
+    await new Promise(r => setTimeout(r, 50))
+    expect(enqueue).not.toHaveBeenCalled()
+    expect(studyRun).not.toHaveBeenCalled()
+    expect(studyAbort).not.toHaveBeenCalled()
+    vi.mocked(useProjectRun).mockReturnValue(null)
   })
 
   it('a plain run request runs the study, as the header Run does', async () => {
