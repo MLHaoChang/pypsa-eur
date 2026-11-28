@@ -892,6 +892,7 @@ def test_the_circular_import_cases_are_exactly_the_discovered_fragments():
         "asset_results",
         "campus_electrical",
         "energization",
+        "expert_catalogue",
         "explanation",
         "lv08_bcampus",
         "report_templates",

@@ -4707,6 +4707,11 @@ def _dispatch_real_tool_call(
             "run_id": ui_event_payload.get("run_id"),
             "section": ui_event_payload.get("section"),
             "baseline_run_id": ui_event_payload.get("baseline_run_id"),
+            # Expert catalogue 05 — open_parameter names the entry it opened
+            # (the current id when a former id was given).
+            "entry_id": ui_event_payload.get("entry_id"),
+            "renamed_from": ui_event_payload.get("renamed_from"),
+            "plain_name": ui_event_payload.get("plain_name"),
             # Preserve compare_scenarios numeric payload when present.
             **{
                 k: result[k]

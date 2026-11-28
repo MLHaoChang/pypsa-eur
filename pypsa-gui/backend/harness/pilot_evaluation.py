@@ -282,6 +282,30 @@ GOLDEN_CASES = tuple(case for case in CASES if case.fault == "golden")
 MANIFEST_SHA256 = hashlib.sha256(json.dumps([asdict(case) for case in CASES], sort_keys=True).encode()).hexdigest()
 
 
+_FENCED = re.compile(r"```.*?(?:```|$)", re.S)
+_BACKTICKED = re.compile(r"`[^`\n]*`")
+
+
+def _snake_model_names() -> tuple[str, ...]:
+    """Every snake_case catalogue model name (the raw-name guard's whole-word rule, RAW-NAMES-1)."""
+    from services.asset_schema.catalogue import entries
+
+    return tuple(sorted({e.model_name for e in entries() if "_" in e.model_name}, key=lambda n: (-len(n), n)))
+
+
+def raw_model_names(text: str) -> list[str]:
+    """The model names a reply shows the user as written: whole snake_case words outside code.
+
+    A backticked name is not counted: the chat shows it as its plain name
+    (display replacement, spec expert-catalogue §7.3); fenced code is code."""
+    prose = _BACKTICKED.sub(" ", _FENCED.sub(" ", text))
+    names = _snake_model_names()
+    if not names:
+        return []
+    found = re.findall(r"(?<![A-Za-z0-9_])(" + "|".join(map(re.escape, names)) + r")(?![A-Za-z0-9_])", prose)
+    return sorted(set(found))
+
+
 def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     """Score the public result independently; never trust a passed verdict alone."""
     failures = set()
@@ -367,6 +391,9 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     complete = receipt.get("request_complete") is True
     if complete != case.valid or approved.get("verdict") != ("passed" if case.valid else "limited"):
         failures.add("verdict_or_completeness")
+    raw_names = raw_model_names(text)
+    if raw_names:
+        failures.add("raw_model_name")
     false_accept = not case.valid and (complete or bool(answered & set(case.unavailable)) or bool(incorrect))
     false_reject = case.valid and (not complete or fulfilled != len(case.expected))
     return {
@@ -377,6 +404,7 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
         "fulfilled_slots": int(fulfilled), "expected_slots": len(case.expected),
         "unavailable_slots": sum(slot.get("disposition") != "answered" for slot in slots),
         "required_slots": len(required), "unchecked_publication": bool(unsafe),
+        "raw_names": raw_names,
     }
 
 
