@@ -92,14 +92,14 @@ def with_plain_names(
     return _wrapped
 
 
-def _attr_keys(bound: dict[str, Any]):
-    attrs = bound.get("attrs")
-    return list(attrs) if isinstance(attrs, dict) else ()
+def _keys_of(arg: str) -> Callable[[dict[str, Any]], Any]:
+    """The columns of a call's dict argument `arg` (`attrs`, `updates`)."""
 
+    def keys(bound: dict[str, Any]):
+        v = bound.get(arg)
+        return list(v) if isinstance(v, dict) else ()
 
-def _update_keys(bound: dict[str, Any]):
-    updates = bound.get("updates")
-    return list(updates) if isinstance(updates, dict) else ()
+    return keys
 
 
 def _batch_keys(bound: dict[str, Any]):
@@ -111,8 +111,8 @@ def _batch_keys(bound: dict[str, Any]):
 
 #: The write tools that take model names, and where each call names them.
 COLUMNS = {
-    "create_component": _attr_keys,
-    "update_component": _attr_keys,
-    "bulk_update_components": _update_keys,
+    "create_component": _keys_of("attrs"),
+    "update_component": _keys_of("attrs"),
+    "bulk_update_components": _keys_of("updates"),
     "batch_create_components": _batch_keys,
 }

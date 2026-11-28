@@ -39,7 +39,7 @@ def find_parameter(
     """Up to 8 catalogue entries for `query`, each with the open project's assets (10 at most)."""
     if asset_type is not None and lookup.asset_type(asset_type) is None:
         raise HTTPException(
-            400,
+            422,
             detail={
                 "error_kind": "invalid_parameter_filter",
                 "field": "asset_type",
@@ -48,7 +48,7 @@ def find_parameter(
         )
     if function is not None and function not in FUNCTION_IDS:
         raise HTTPException(
-            400,
+            422,
             detail={
                 "error_kind": "invalid_parameter_filter",
                 "field": "function",
@@ -68,7 +68,7 @@ def find_parameter(
                 "plain_name": e.plain_name,
                 "model_name": e.model_name,
                 "component_class": e.scope,
-                "asset_type": asset_type,
+                "asset_types": lookup.asset_types_of(e.scope),
                 "group": lookup.group_name(e.group),
                 "unit": e.spec.unit_display or None,
                 "short_help": e.short_help,
@@ -87,7 +87,7 @@ def open_parameter(entry_id: str, asset: str | None = None) -> dict:
     entry, renamed = lookup.resolve(entry_id)
     if entry is None:
         raise HTTPException(
-            400,
+            422,
             detail={
                 "error_kind": "unknown_parameter",
                 "field": "entry_id",
@@ -117,7 +117,7 @@ def open_parameter(entry_id: str, asset: str | None = None) -> dict:
                 else f"no {entry.scope} '{asset}' in the open project."
             )
             raise HTTPException(
-                404,
+                422,
                 detail={
                     "error_kind": "component_not_found",
                     "message": f"{entry.plain_name}: {why}",

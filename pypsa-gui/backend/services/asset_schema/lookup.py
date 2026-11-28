@@ -84,6 +84,11 @@ def group_name(group_id: str) -> str:
     return E.GROUP_NAMES.get(group_id, group_id)
 
 
+def asset_types_of(scope: str) -> list[str]:
+    """The ids of the placeable asset types drawn from class `scope` (none for a settings scope)."""
+    return [t.id for t in ASSET_TYPES if scope in t.components and not t.internal]
+
+
 def asset_type(type_id: str) -> AssetTypeSpec | None:
     return next((t for t in ASSET_TYPES if t.id == type_id), None)
 
@@ -157,10 +162,6 @@ def search(
     return [e for e, _ in hits[:limit]]
 
 
-def _carrier_re(pattern: str) -> re.Pattern[str]:
-    return re.compile(pattern, re.I)
-
-
 def asset_type_of(
     cls: str,
     row: dict[str, Any],
@@ -185,13 +186,15 @@ def asset_type_of(
         for m in t.match:
             if m.component != cls:
                 continue
-            if m.carrier is not None and not _carrier_re(m.carrier).search(carrier):
+            if m.carrier is not None and not re.compile(m.carrier, re.I).search(
+                carrier
+            ):
                 continue
             if m.has_bus2 and not has_bus2:
                 continue
             if m.far_carrier is not None:
                 far = str(row.get(m.far_carrier[0]) or "")
-                if not far or not _carrier_re(m.far_carrier[1]).search(
+                if not far or not re.compile(m.far_carrier[1], re.I).search(
                     bus_carrier(far) or "AC"
                 ):
                     continue

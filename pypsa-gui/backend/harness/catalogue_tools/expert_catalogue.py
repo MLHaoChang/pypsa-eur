@@ -23,7 +23,7 @@ TOOLS = [
         "Find parameters in the parameter catalogue by what the user calls "
         'them ("transformer tap", "running cost", "battery size"): up '
         "to 8 entries, best first, each with entry_id, plain_name, "
-        "model_name, asset_type, group, unit, short_help, guide (the "
+        "model_name, component_class, asset_types (the asset type ids it applies to), group, unit, short_help, guide (the "
         "parameter guide's text, quote it to explain the parameter) and the "
         "active project's assets that carry it: `assets` [{name, value, "
         "assumed}] (at most 10; `assumed` is true when the value was left "

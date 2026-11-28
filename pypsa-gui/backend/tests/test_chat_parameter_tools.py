@@ -105,6 +105,7 @@ def test_find_parameter_answers_the_entry_and_the_open_projects_assets(baseline)
         }
     ]
     assert gen["assets_total"] == 1 and gen["assets_truncated"] is False
+    assert "pv" in gen["asset_types"] and "bess" not in gen["asset_types"]
 
 
 def test_a_value_left_at_its_default_is_assumed(baseline):
@@ -313,7 +314,9 @@ def test_write_results_carry_plain_names_and_refusals_name_the_column():
         raise HTTPException(400, "marginal_cost is not a number")
 
     def wrap(f):
-        return chat_plain_names.with_plain_names(f, columns=chat_plain_names._attr_keys)  # noqa: E731
+        return chat_plain_names.with_plain_names(
+            f, columns=chat_plain_names._keys_of("attrs")
+        )  # noqa: E731
 
     out = wrap(ok)("Generator", "G1", {"p_nom": 5, "not_a_column": 1})
     assert out == {"updated": "G1", "plain_names": {"p_nom": "Capacity"}}
