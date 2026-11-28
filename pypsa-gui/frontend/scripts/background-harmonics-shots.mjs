@@ -13,7 +13,8 @@
  * `row-error`, `row-remove`; Guided home (mode guided only) `site-card-empty|stored|stale` (the read line on the
  * Site card) and `drawer-empty|stored|error` (the field drawer after Edit ›); Results states `res-none`, `res-used`, `res-unused`, `res-notcomputed`, `res-error`.
  *
- * Usage: node scripts/background-harmonics-shots.mjs [outDir]      env: BASE, MODES (guided,expert)
+ * Usage: node scripts/background-harmonics-shots.mjs [outDir]      env: BASE, MODES (guided,expert), ONLY_NEW=1 (skip Results),
+ * ONLY_RESULTS=1 (Results only: skips the input-row and Guided states)
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -31,7 +32,7 @@ const STATE = JSON.parse(await fs.readFile(path.join(here, 'dips-restart-shots.s
 
 const STORED = { has_background: true, source: 'Grid operator measurement campaign', measured_on: '2026-10-03',
   filename: 'pcc_background.csv', orders: 12, poc: 'grid', uploaded_at: '2026-11-20T09:14:00Z', in_latest_run: true }
-const BASIS = 'screening estimate: harmonic current sources at the PCC against the grid code voltage-distortion limits; the binding answer is a harmonic study'
+const BASIS = 'static screen; binding answer is a harmonic study'
 const rows = [
   { level: 'unit', unit: 'mill_1', thd_pct: 1.84, thd_limit_pct: 3, worst_order: 5, worst_u_h_pct: 1.2, worst_limit_pct: 2, verdict: 'pass' },
   { level: 'unit', unit: 'crusher', thd_pct: 3.6, thd_limit_pct: 3, worst_order: 7, worst_u_h_pct: 2.4, worst_limit_pct: 2, verdict: 'fail' },
@@ -150,7 +151,7 @@ try {
     // Guided shows no input row: its Site card's connection section is the Grid readiness scorecard, and
     // ConnectionLimits renders only in Expert's campus electrical panel (the Guided field drawer passes
     // `only`, which hides the row). So Guided has the Results shots alone.
-    for (const [key, def] of Object.entries(mode === 'guided' ? {} : ROWS)) {
+    for (const [key, def] of Object.entries(process.env.ONLY_RESULTS || mode === 'guided' ? {} : ROWS)) {
       await step(`row-${key}`, async () => {
         rowNow = def; emissionNow = RES.used
         await reload()
@@ -173,7 +174,7 @@ try {
     }
     // Guided's home: the read line on the Site card, and the field drawer Edit › opens (the row alone).
     const GUIDED = { empty: ROWS.empty, stored: ROWS.stored, stale: ROWS.stale }
-    for (const key of Object.keys(mode === 'guided' ? GUIDED : {})) {
+    for (const key of Object.keys(!process.env.ONLY_RESULTS && mode === 'guided' ? GUIDED : {})) {
       await step(`site-card-${key}`, async () => {
         rowNow = GUIDED[key]; emissionNow = RES.used
         await reload()
@@ -182,7 +183,7 @@ try {
         await shot(page.getByTestId('hub-site-readiness'), `site-card-${key}`)
       })
     }
-    for (const [key, def] of Object.entries(mode === 'guided' ? { empty: ROWS.empty, stored: ROWS.stored, error: ROWS.error } : {})) {
+    for (const [key, def] of Object.entries(!process.env.ONLY_RESULTS && mode === 'guided' ? { empty: ROWS.empty, stored: ROWS.stored, error: ROWS.error } : {})) {
       await step(`drawer-${key}`, async () => {
         rowNow = def; emissionNow = RES.used
         await reload()
