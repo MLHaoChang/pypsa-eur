@@ -12,7 +12,8 @@
 // The basis comes from the solve's own record (`/simulation/status`, `/results/objective_decomposition`);
 // nothing here derives a rate or a weight.
 import type { ObjectiveDecomposition } from '../../api/results'
-import type { Generator, Link, SimulationStatus } from '../../api/types'
+import type { FlowSection } from '../../api/flow'
+import type { SimulationStatus } from '../../api/types'
 
 type Basis = Pick<SimulationStatus, 'objective_basis' | 'objective_discounted_to'>
 
@@ -94,29 +95,21 @@ export function objectiveConstant(dec: ObjectiveDecomposition | null | undefined
   return total != null && big(c, total) ? c : null
 }
 
-type SupplyGen = Pick<Generator, 'bus' | 'carrier'>
-type SupplyLink = Pick<Link, 'bus0' | 'p_nom' | 'p_max_pu'> & { p_nom_opt?: number; eh_role?: string | null }
+type ConnectionSection = Pick<FlowSection, 'state' | 'connection_limit'>
+
+/** One decimal, as the study report writes the connection limit (`f"{v:,.1f}"`): "40.0", "1,250.0". */
+const mw1 = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
 /**
- * The grid supply's limit, which Key capacities names instead of the supply generator's placeholder p_nom
- * (template-e2e 18): the summed rating of the Links that carry power from a grid-supply bus into the site
- * (or are tagged `grid_import`), each at its static availability. `{ mw }`, 0 when every such Link is
- * switched off (the island microgrid's open tie); null when no such Link is found.
+ * Key capacities' line for the grid supply it does not list (template-e2e 18), read from the flow's connection
+ * section: the limit is the server's one reading (`flow_service.import_capacity`, the figure the study and
+ * te 20's grid-connection line take), never re-summed here. An off-grid template's connection is
+ * `not_needed`: it imports nothing. null until the flow is read.
  */
-export function gridSupplyLimit(
-  generators: SupplyGen[] | null | undefined, links: SupplyLink[] | null | undefined,
-): { mw: number } | null {
-  const buses = new Set((generators ?? []).filter(g => /^grid$/i.test(String(g.carrier ?? '').trim())).map(g => g.bus))
-  const into = (links ?? []).filter(l => buses.has(l.bus0) || l.eh_role === 'grid_import')
-  if (!into.length) return null
-  const finite = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
-  const mw = into.reduce((sum, l) => sum + Math.max(0, finite(l.p_nom_opt, finite(l.p_nom, 0)) * finite(l.p_max_pu, 1)), 0)
-  return { mw }
-}
-
-/** Key capacities' line for the grid supply it does not list. */
-export function gridSupplyWords(limit: { mw: number } | null, fmtMw: (mw: number) => string): string {
-  if (limit == null) return "Grid supply is not listed: what the site can import is its connection's rating."
-  if (limit.mw <= 0) return 'Grid supply: none, the tie to the grid is switched off.'
-  return `Grid supply: up to ${fmtMw(limit.mw)}, through the site's connection.`
+export function gridSupplyWords(conn: ConnectionSection | null | undefined): string | null {
+  if (conn == null) return null
+  if (conn.state === 'not_needed') return 'Grid supply: none, the site runs off the grid.'
+  const limit = conn.connection_limit
+  if (limit?.mw != null) return `Grid supply: up to ${mw1(limit.mw)} MW, through the site's connection.`
+  return `Grid supply is not listed: ${limit?.refusal ?? "what the site can import is its connection's rating."}`
 }

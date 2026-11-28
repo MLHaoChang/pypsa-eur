@@ -29,9 +29,8 @@ import { solveWords } from './solveWords'
 import HeadlineStrip, { useHeadlineKpis } from './HeadlineStrip'
 import { COST_WORDS, totalCostWords } from './headlineWords'
 import {
-  gridSupplyLimit, gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
+  gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
 } from './costBasis'
-import { networkApi } from '../../api/network'
 import { getObjectiveDecomposition } from '../../api/results'
 import { NOT_RECORDED, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 import { StatePill } from '../../components/ResultState'
@@ -141,8 +140,8 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   })
   const { data: readiness } = useGridReadiness()
   // The grid supply's connection, which Key capacities names in place of the supply's placeholder size.
-  const { data: generators } = useQuery({ queryKey: nk(project, 'generators'), queryFn: networkApi.getGenerators })
-  const { data: links } = useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks })
+  const { flow, section: flowSection } = useProjectFlow()
+  const gridNote = gridSupplyWords(flowSection('connection'))
   const { data: stats } = useQuery({ queryKey: nk(project, 'results_statistics'), queryFn: resultsApi.getStatistics })
 
   // A figure the headline strip shows is not repeated as a card headline below
@@ -182,7 +181,6 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const { study } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, false)
-  const { flow } = useProjectFlow()
   const studyKind = flow?.sections.find(sec => sec.section === 'results')?.freshness_by_kind?.study
   const requestDispatchSolve = useUIStore(st => st.requestDispatchSolve)
   const resultsOutOfDate = useResultsOutOfDate()
@@ -359,9 +357,9 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           {caps.length > MAX_CAPACITY_ROWS && (
             <p className="text-[10px] text-muted">and {caps.length - MAX_CAPACITY_ROWS} more</p>
           )}
-          {hasGridSupply(stats as Record<string, unknown>[] | null | undefined) && (
+          {gridNote != null && hasGridSupply(stats as Record<string, unknown>[] | null | undefined) && (
             <p className="text-[10px] text-muted" data-testid="summary-cap-grid-note">
-              {gridSupplyWords(gridSupplyLimit(generators, links), mw => fmtCapacity(mw, 'MW'))}
+              {gridNote}
             </p>
           )}
         </Card>

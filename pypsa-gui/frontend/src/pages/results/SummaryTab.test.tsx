@@ -436,21 +436,27 @@ describe('Key capacities leaves out the grid supply (template-e2e 18)', () => {
     { level_0: 'Generator', level_1: 'grid', 'Optimal Capacity': 500, 'Installed Capacity': 500 },
     { level_0: 'Generator', level_1: 'solar', 'Optimal Capacity': 12, 'Installed Capacity': 12 },
   ]
-  it("names the connection's limit, not the supply's placeholder 500 MW", async () => {
+  const flowWith = (connection: object) =>
+    flowApi.getProjectFlow.mockResolvedValue({ sections: [{ section: 'connection', ...connection }] } as never)
+  it("names the server's connection limit, not the supply's placeholder 500 MW", async () => {
     api.getStatistics.mockResolvedValue(GRID_STATS)
-    api.getGenerators.mockResolvedValue([{ name: 'grid_supply', bus: 'grid', carrier: 'grid' }])
-    api.getLinks.mockResolvedValue([{ name: 'grid_import', bus0: 'grid', p_nom: 40, p_max_pu: 1, p_nom_opt: 40 }])
+    flowWith({ state: 'complete', connection_limit: { mw: 40, refusal: null, links: ['grid_import'] } })
     renderTab()
     await vi.waitFor(() => expect(screen.getByTestId('summary-cap-grid-note').textContent)
-      .toMatch(/^Grid supply: up to 40(\.0)? MW, through the site's connection\.$/))
+      .toBe("Grid supply: up to 40.0 MW, through the site's connection."))
     expect(screen.queryByTestId('summary-cap-Generator-grid')).toBeNull()
   })
-  it('says an off-grid site gets none', async () => {
+  it('says an off-grid site gets none, whatever its tie is rated', async () => {
     api.getStatistics.mockResolvedValue(GRID_STATS)
-    api.getGenerators.mockResolvedValue([{ name: 'mainland_supply', bus: 'mainland', carrier: 'grid' }])
-    api.getLinks.mockResolvedValue([{ name: 'subsea_tie', bus0: 'mainland', p_nom: 20, p_max_pu: 0 }])
+    flowWith({ state: 'not_needed', connection_limit: { mw: 20, refusal: null, links: ['subsea_tie'] } })
     renderTab()
     await vi.waitFor(() => expect(screen.getByTestId('summary-cap-grid-note').textContent)
-      .toBe('Grid supply: none, the tie to the grid is switched off.'))
+      .toBe('Grid supply: none, the site runs off the grid.'))
+  })
+  it('shows no grid note until the flow is read', async () => {
+    api.getStatistics.mockResolvedValue(GRID_STATS)
+    renderTab()
+    await screen.findByText('solar', { exact: false })
+    expect(screen.queryByTestId('summary-cap-grid-note')).toBeNull()
   })
 })

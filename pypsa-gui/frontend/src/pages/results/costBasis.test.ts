@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ObjectiveDecomposition } from '../../api/results'
 import {
-  gridSupplyLimit, gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
+  gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
 } from './costBasis'
 
 const m = (v: number) => `€${(v / 1e6).toFixed(1)} M`
@@ -96,23 +96,20 @@ describe('objectiveConstant', () => {
 })
 
 describe('the grid supply note (Key capacities)', () => {
-  const mw = (v: number) => `${v} MW`
-  it('names the connection rating behind the supply (the data centre\'s 40 MW import Link)', () => {
-    const limit = gridSupplyLimit([{ bus: 'grid', carrier: 'grid' }, { bus: 'dc', carrier: 'solar' }], [
-      { bus0: 'grid', p_nom: 40, p_max_pu: 1, p_nom_opt: 40 },
-      { bus0: 'dc_mv', p_nom: 80, p_max_pu: 1 },
-    ])
-    expect(limit).toEqual({ mw: 40 })
-    expect(gridSupplyWords(limit, mw)).toBe("Grid supply: up to 40 MW, through the site's connection.")
+  const conn = (mw: number | null, refusal: string | null = null) =>
+    ({ state: 'complete' as const, connection_limit: { mw, refusal, links: ['grid_import'] } })
+  it("names the server's connection limit, to one decimal (the data centre's 40 MW import Link)", () => {
+    expect(gridSupplyWords(conn(40))).toBe("Grid supply: up to 40.0 MW, through the site's connection.")
+    expect(gridSupplyWords(conn(1250))).toBe("Grid supply: up to 1,250.0 MW, through the site's connection.")
   })
-  it('says an open tie supplies nothing (the island microgrid, p_max_pu 0)', () => {
-    const limit = gridSupplyLimit([{ bus: 'mainland', carrier: 'grid' }], [{ bus0: 'mainland', p_nom: 20, p_max_pu: 0 }])
-    expect(limit).toEqual({ mw: 0 })
-    expect(gridSupplyWords(limit, mw)).toBe('Grid supply: none, the tie to the grid is switched off.')
+  it('says an off-grid site imports nothing, whatever its tie is rated (the island microgrid)', () => {
+    expect(gridSupplyWords({ state: 'not_needed', connection_limit: { mw: 20, refusal: null, links: ['tie'] } }))
+      .toBe('Grid supply: none, the site runs off the grid.')
   })
-  it('reads a Link tagged grid_import, and says no figure when it finds no connection', () => {
-    expect(gridSupplyLimit([], [{ bus0: 'x', p_nom: 55, p_max_pu: 1, eh_role: 'grid_import' }])).toEqual({ mw: 55 })
-    expect(gridSupplyLimit([{ bus: 'grid', carrier: 'grid' }], [])).toBeNull()
-    expect(gridSupplyWords(null, mw)).toMatch(/^Grid supply is not listed/)
+  it("says the server's reason where the network fixes no limit, and nothing until the flow is read", () => {
+    expect(gridSupplyWords(conn(null, 'The connection limit is 0 MW: set one or choose another site type.')))
+      .toBe('Grid supply is not listed: The connection limit is 0 MW: set one or choose another site type.')
+    expect(gridSupplyWords({ state: 'complete' })).toMatch(/^Grid supply is not listed: what the site can import/)
+    expect(gridSupplyWords(null)).toBeNull()
   })
 })
