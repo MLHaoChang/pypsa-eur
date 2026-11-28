@@ -4710,7 +4710,8 @@ def _dispatch_real_tool_call(
             # Expert catalogue 05 — open_parameter names the entry it opened
             # (the current id when a former id was given).
             "entry_id": ui_event_payload.get("entry_id"),
-            "renamed_from": ui_event_payload.get("renamed_from"),
+            "current_id": ui_event_payload.get("current_id"),
+            "former_id": ui_event_payload.get("former_id"),
             "plain_name": ui_event_payload.get("plain_name"),
             # Preserve compare_scenarios numeric payload when present.
             **{

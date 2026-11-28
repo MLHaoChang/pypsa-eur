@@ -748,6 +748,7 @@ PROXIES = {
         "get_asset_health",
     ],
     "energization": [],
+    "expert_catalogue": [],
     "explanation": ["get_asset_results", "get_results"],
     "ui_control": ["_acting"],
     "asset_results": ["_save_agent_export"],

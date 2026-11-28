@@ -1,0 +1,351 @@
+{
+ "about": "Shared by tests/test_catalogue_lookup.py (services/asset_schema/lookup.py) and frontend/src/catalogue/searchIndex.parity.test.ts (searchIndex.ts, findEntry): one ranking for the palette and find_parameter (expert-catalogue 05). function and asset_type filter the entries first; the palette's lens only orders them.",
+ "entries": [
+  {
+   "id": "generator.capacity",
+   "scope": "Generator",
+   "model_name": "p_nom",
+   "plain_name": "Capacity",
+   "depth": "essentials",
+   "functions": {
+    "dispatch": "needs"
+   },
+   "aliases": [
+    "rated power"
+   ],
+   "short_help": "The most the unit can produce.",
+   "guide": "Capacity sets the nameplate size.",
+   "former_ids": []
+  },
+  {
+   "id": "link.capacity",
+   "scope": "Link",
+   "model_name": "p_nom",
+   "plain_name": "Capacity",
+   "depth": "essentials",
+   "functions": {
+    "dispatch": "reads"
+   },
+   "aliases": [],
+   "short_help": "Largest flow through the link.",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.running_cost",
+   "scope": "Generator",
+   "model_name": "marginal_cost",
+   "plain_name": "Running cost",
+   "depth": "basic",
+   "functions": {
+    "dispatch": "needs",
+    "finance": "reads"
+   },
+   "aliases": [
+    "marginal cost"
+   ],
+   "short_help": "Cost of each MWh produced.",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "transformer.tap_ratio",
+   "scope": "Transformer",
+   "model_name": "tap_ratio",
+   "plain_name": "Tap ratio",
+   "depth": "advanced",
+   "functions": {
+    "load_flow": "needs"
+   },
+   "aliases": [],
+   "short_help": "Ratio of the off-nominal tap.",
+   "guide": null,
+   "former_ids": [
+    "transformer.tap"
+   ]
+  },
+  {
+   "id": "store.energy_capacity",
+   "scope": "Store",
+   "model_name": "e_nom",
+   "plain_name": "Energy capacity",
+   "depth": "essentials",
+   "functions": {
+    "dispatch": "needs"
+   },
+   "aliases": [
+    "battery size"
+   ],
+   "short_help": "Energy the store holds.",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.efficiency",
+   "scope": "Generator",
+   "model_name": "efficiency",
+   "plain_name": "Efficiency",
+   "depth": "basic",
+   "functions": {},
+   "aliases": [],
+   "short_help": "Share of fuel energy turned into power.",
+   "guide": "Higher efficiency lowers the running cost.",
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_a",
+   "scope": "Generator",
+   "model_name": "upper_a",
+   "plain_name": "Upper limit A",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_b",
+   "scope": "Generator",
+   "model_name": "upper_b",
+   "plain_name": "Upper limit B",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_c",
+   "scope": "Generator",
+   "model_name": "upper_c",
+   "plain_name": "Upper limit C",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_d",
+   "scope": "Generator",
+   "model_name": "upper_d",
+   "plain_name": "Upper limit D",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_e",
+   "scope": "Generator",
+   "model_name": "upper_e",
+   "plain_name": "Upper limit E",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_f",
+   "scope": "Generator",
+   "model_name": "upper_f",
+   "plain_name": "Upper limit F",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_g",
+   "scope": "Generator",
+   "model_name": "upper_g",
+   "plain_name": "Upper limit G",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_h",
+   "scope": "Generator",
+   "model_name": "upper_h",
+   "plain_name": "Upper limit H",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_i",
+   "scope": "Generator",
+   "model_name": "upper_i",
+   "plain_name": "Upper limit I",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.upper_j",
+   "scope": "Generator",
+   "model_name": "upper_j",
+   "plain_name": "Upper limit J",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  }
+ ],
+ "search": [
+  {
+   "query": "Capacity",
+   "ids": [
+    "generator.capacity",
+    "link.capacity",
+    "store.energy_capacity"
+   ],
+   "why": "exact plain name (tie on name and depth: by id), then a word prefix"
+  },
+  {
+   "query": "rated power",
+   "ids": [
+    "generator.capacity"
+   ],
+   "why": "alias"
+  },
+  {
+   "query": "battery size",
+   "ids": [
+    "store.energy_capacity"
+   ],
+   "why": "alias"
+  },
+  {
+   "query": "p_nom",
+   "ids": [
+    "generator.capacity",
+    "link.capacity"
+   ],
+   "why": "model name"
+  },
+  {
+   "query": "p nom",
+   "ids": [
+    "generator.capacity",
+    "link.capacity"
+   ],
+   "why": "model name, spaced"
+  },
+  {
+   "query": "tap",
+   "ids": [
+    "transformer.tap_ratio"
+   ],
+   "why": "word prefix"
+  },
+  {
+   "query": "cost",
+   "ids": [
+    "generator.running_cost",
+    "generator.efficiency"
+   ],
+   "why": "word prefix, then guide text"
+  },
+  {
+   "query": "mwh",
+   "ids": [
+    "generator.running_cost"
+   ],
+   "why": "short help"
+  },
+  {
+   "query": "nameplate",
+   "ids": [
+    "generator.capacity"
+   ],
+   "why": "guide text"
+  },
+  {
+   "query": "na",
+   "ids": [],
+   "why": "too short for help or guide text"
+  },
+  {
+   "query": "upper",
+   "ids": [
+    "generator.upper_a",
+    "generator.upper_b",
+    "generator.upper_c",
+    "generator.upper_d",
+    "generator.upper_e",
+    "generator.upper_f",
+    "generator.upper_g",
+    "generator.upper_h"
+   ],
+   "why": "the cap of 8, by plain name"
+  },
+  {
+   "query": "   ",
+   "ids": [],
+   "why": "blank"
+  },
+  {
+   "query": "capacity",
+   "ids": [
+    "generator.capacity",
+    "store.energy_capacity",
+    "link.capacity"
+   ],
+   "function": "dispatch",
+   "why": "what the function needs first"
+  },
+  {
+   "query": "cost",
+   "ids": [
+    "generator.running_cost"
+   ],
+   "function": "dispatch",
+   "why": "the function filter drops entries it does not read"
+  },
+  {
+   "query": "capacity",
+   "ids": [
+    "store.energy_capacity"
+   ],
+   "asset_type": "bess",
+   "why": "the asset type's classes only"
+  }
+ ],
+ "resolve": [
+  {
+   "id": "transformer.tap_ratio",
+   "current": "transformer.tap_ratio"
+  },
+  {
+   "id": "transformer.tap",
+   "current": "transformer.tap_ratio",
+   "why": "a former id"
+  },
+  {
+   "id": "transformer.nope",
+   "current": null
+  }
+ ]
+}

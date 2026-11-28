@@ -17,11 +17,11 @@ this module at its end, so a top-level import would be circular.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from fastapi import HTTPException
 
+from services import parameter_assets as PA
 from services.asset_schema import lookup
 from services.asset_schema.catalogue import FUNCTION_IDS, guide_body
 from services.asset_schema.schema import CLASS_ATTR
@@ -31,66 +31,6 @@ MAX_ENTRIES = 8
 MAX_ASSETS = 10
 #: The guide text an entry carries, enough to quote; the full guide opens in the app.
 GUIDE_EXCERPT = 600
-
-
-def _active_network():
-    """The open project's network after its ACL check, else None (no project open)."""
-    from services.chat_tools import PyPSAService, _authorized_project
-
-    name = PyPSAService.get_loaded_project()
-    if not name:
-        return None
-    _authorized_project(name)
-    return PyPSAService.get_network()
-
-
-def _scalar(v: Any) -> Any:
-    if hasattr(v, "item"):
-        v = v.item()
-    if isinstance(v, float):
-        if math.isnan(v):
-            return None
-        if math.isinf(v):
-            return "inf" if v > 0 else "-inf"
-    return v
-
-
-def _bus_carriers(n) -> dict[str, str]:
-    buses = getattr(n, "buses", None)
-    if buses is None or "carrier" not in buses:
-        return {}
-    return {str(k): str(v) for k, v in buses["carrier"].items()}
-
-
-def _assets(n, entry, type_id: str | None) -> list[dict[str, Any]]:
-    """Every asset of the entry's class (of `type_id` when given), with its value in display units."""
-    attr = CLASS_ATTR.get(entry.scope)
-    df = getattr(n, attr, None) if attr else None
-    if df is None or len(df.index) == 0:
-        return []
-    carriers = _bus_carriers(n)
-    spec = entry.spec
-    default = entry.default.get("value")
-    out = []
-    for name, row in df.iterrows():
-        rowd = {"name": str(name), **{str(k): row[k] for k in row.index}}
-        t = lookup.asset_type_of(entry.scope, rowd, carriers.get)
-        if type_id is not None and (t is None or t.id != type_id):
-            continue
-        stored = _scalar(row[spec.key]) if spec.key in row.index else None
-        assumed = stored is None or stored == "" or (default is not None and stored == default)
-        value = stored
-        if isinstance(stored, (int, float)) and not isinstance(stored, bool) and spec.scale != 1:
-            value = stored * spec.scale
-        out.append(
-            {
-                "name": str(name),
-                "asset_type": t.id if t is not None else None,
-                "value": value,
-                "assumed": bool(assumed),
-            }
-        )
-    return out
 
 
 def find_parameter(
@@ -115,12 +55,12 @@ def find_parameter(
                 "message": f"There is no function '{function}'. Use one of: {', '.join(FUNCTION_IDS)}.",
             },
         )
-    n = _active_network()
+    n = PA.active_network()
     results = []
     for e in lookup.search(
         query, asset_type_id=asset_type, function=function, limit=MAX_ENTRIES
     ):
-        assets = _assets(n, e, asset_type) if n is not None else []
+        assets = PA.assets(n, e, asset_type) if n is not None else []
         guide = guide_body(e.id) or ""
         results.append(
             {
@@ -158,26 +98,41 @@ def open_parameter(entry_id: str, asset: str | None = None) -> dict:
         from services.chat_tools import _require_active_project
 
         _require_active_project()
-        n = _active_network()
+        n = PA.active_network()
         attr = CLASS_ATTR.get(entry.scope)
         df = getattr(n, attr, None) if attr else None
         if df is None or asset not in df.index:
+            other = next(
+                (
+                    cls
+                    for cls, a in CLASS_ATTR.items()
+                    if cls != entry.scope
+                    and asset in getattr(getattr(n, a, None), "index", ())
+                ),
+                None,
+            )
+            why = (
+                f"'{asset}' is a {other}, and {entry.plain_name} is a {entry.scope} parameter."
+                if other
+                else f"no {entry.scope} '{asset}' in the open project."
+            )
             raise HTTPException(
                 404,
                 detail={
                     "error_kind": "component_not_found",
-                    "message": f"{entry.plain_name}: no {entry.scope} '{asset}' in the open project.",
+                    "message": f"{entry.plain_name}: {why}",
                 },
             )
     event: dict[str, Any] = {
         "_ui_event": True,
         "kind": "parameter",
         "entry_id": entry.id,
+        "current_id": entry.id,
         "component_class": entry.scope,
         "plain_name": entry.plain_name,
     }
     if renamed:
-        event["renamed_from"] = entry_id
+        event["former_id"] = entry_id
     if asset is not None:
         event["name"] = asset
     return event

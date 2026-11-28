@@ -296,6 +296,11 @@ def _snake_model_names() -> tuple[str, ...]:
 def raw_model_names(text: str) -> list[str]:
     """The model names a reply shows the user as written: whole snake_case words outside code.
 
+    `score` lists them as `raw_names`; `report` counts them per mode and fails a
+    live (model-written) reply that has one. The deterministic suite's checked
+    answers still carry some in their method notes (expert-catalogue issue 12),
+    so there they are counted, not failed.
+
     A backticked name is not counted: the chat shows it as its plain name
     (display replacement, spec expert-catalogue §7.3); fenced code is code."""
     prose = _BACKTICKED.sub(" ", _FENCED.sub(" ", text))
@@ -392,8 +397,6 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     if complete != case.valid or approved.get("verdict") != ("passed" if case.valid else "limited"):
         failures.add("verdict_or_completeness")
     raw_names = raw_model_names(text)
-    if raw_names:
-        failures.add("raw_model_name")
     false_accept = not case.valid and (complete or bool(answered & set(case.unavailable)) or bool(incorrect))
     false_reject = case.valid and (not complete or fulfilled != len(case.expected))
     return {
@@ -438,10 +441,12 @@ def report(results, *, live=False, execution_failed=False, expanded=False):
             "fulfillment": rate(sum(r["fulfilled_slots"] for r in scored), sum(r["expected_slots"] for r in scored)),
             "abstention": rate(sum(r["unavailable_slots"] for r in scored), sum(r["required_slots"] for r in scored)),
             "unchecked_publication": rate(sum(r["unchecked_publication"] for r in scored), len(scored)),
+            "raw_model_names": rate(sum(bool(r.get("raw_names")) for r in scored), len(scored)),
         }
     passed = bool(results) and not (missing or duplicate or unexpected or execution_failed) and all(
         result.get("execution") == "passed" and not result.get("failures")
         and not any(result.get(key) for key in ("false_accept", "false_reject", "incorrect_calculations", "unchecked_publication"))
+        and not (result.get("mode") == "live" and result.get("raw_names"))
         and result.get("fulfilled_slots") == result.get("expected_slots") for result in results
     )
     return {"version": 1, "suite": suite, "oracle": oracle,

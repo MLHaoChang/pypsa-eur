@@ -21,7 +21,7 @@ TOOLS = [
     _t(
         "find_parameter",
         "Find parameters in the parameter catalogue by what the user calls "
-        "them (\"transformer tap\", \"running cost\", \"battery size\"): up "
+        'them ("transformer tap", "running cost", "battery size"): up '
         "to 8 entries, best first, each with entry_id, plain_name, "
         "model_name, asset_type, group, unit, short_help, guide (the "
         "parameter guide's text, quote it to explain the parameter) and the "
@@ -59,10 +59,10 @@ TOOLS = [
         "and changes nothing. entry_id is find_parameter's entry_id; asset "
         "names the component to open it on (without it the user picks one). "
         "An entry_id from before a rename opens the current entry and the "
-        "result names it (`entry_id`, `renamed_from`). Refused, no "
+        "result names both (`current_id`, `former_id`). Refused, no "
         "navigation: unknown_parameter (no entry has that id: call "
         "find_parameter), component_not_found (no such asset of that "
-        "parameter's class in the open project). Safety: read.",
+        "parameter's class in the open project; an asset of another class is named as such). Safety: read.",
         {
             "entry_id": {"type": "string", "minLength": 1, "maxLength": 200},
             "asset": {

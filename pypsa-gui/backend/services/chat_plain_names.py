@@ -4,11 +4,13 @@ Plain names in write-tool results (expert-catalogue issue 05, spec §3.6 / §7.1
 The generic write tools keep taking model names (`attrs`, `updates`: the
 model's words), but what they answer names each column the way the user reads
 it: a result gains `plain_names` {model_name: plain_name} for the columns the
-call named, and a refusal about one of them opens with its plain name
-("Capacity (p_nom): …"), so the assistant relays the user's word (RAW-NAMES-1).
+call named, and a refusal about one of them gains `plain_name` beside its
+`field`; the model reads it as "Capacity (p_nom): <the shared message>", so the
+assistant relays the user's word (RAW-NAMES-1). The message itself is never
+changed: every write path refuses with one text (01a-3a R7).
 
 Columns the catalogue does not hold are left out; a refusal that names none of
-the call's columns is passed on unchanged.
+the call's columns, or whose detail is plain text, is passed on unchanged.
 """
 
 from __future__ import annotations
@@ -16,7 +18,8 @@ from __future__ import annotations
 import functools
 import inspect
 import re
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from fastapi import HTTPException
 
@@ -52,11 +55,6 @@ def _named_column(detail: Any, names: dict[str, str]) -> str | None:
     return None
 
 
-def _opened(text: str, plain: str, key: str) -> str:
-    head = f"{plain} ({key})"
-    return text if text.startswith(head) else f"{head}: {text}"
-
-
 def with_plain_names(
     fn: Callable[..., Any], *, columns: Callable[[dict[str, Any]], Any]
 ) -> Callable[..., Any]:
@@ -75,12 +73,16 @@ def with_plain_names(
             result = fn(*args, **kwargs)
         except HTTPException as exc:
             key = _named_column(exc.detail, names) if names else None
-            if key is not None:
-                d = exc.detail
-                if isinstance(d, dict) and isinstance(d.get("message"), str):
-                    exc.detail = {**d, "message": _opened(d["message"], names[key], key)}
-                elif isinstance(d, str):
-                    exc.detail = _opened(d, names[key], key)
+            d = exc.detail
+            if key is not None and isinstance(d, dict) and "plain_name" not in d:
+                # A key beside the shared message, never a change to it: REST, preview
+                # and chat keep one text (01a-3a R7); the model-facing copy opens with
+                # it (`harness.results._error_result_content`).
+                exc.detail = {
+                    **d,
+                    "field": d.get("field") or key,
+                    "plain_name": names[key],
+                }
             raise
         if names and isinstance(result, dict) and "plain_names" not in result:
             result = {**result, "plain_names": names}

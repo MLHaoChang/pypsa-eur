@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from services.asset_schema import catalogue as C
 from services.asset_schema import entries as E
@@ -105,7 +106,8 @@ def _match_via(e: C.Entry, q: str, qw: list[str]) -> str | None:
     help_ = _norm(e.short_help)
     if q in help_ or _prefix_match(qw, _words(e.short_help)):
         return "help"
-    if q in _plain_text(C.guide_body(e.id)):
+    guide = e.guide if hasattr(e, "guide") else C.guide_body(e.id)
+    if q in _plain_text(guide):
         return "guide"
     return None
 
@@ -116,11 +118,14 @@ def search(
     asset_type_id: str | None = None,
     function: str | None = None,
     limit: int = 8,
+    pool=None,
 ) -> list[C.Entry]:
     """The best `limit` entries for `query`, narrowed to one asset type's classes and/or one function.
 
     Ranked as the palette ranks: entries the function needs first (with a
-    function), then match strength, then depth, plain name and id."""
+    function), then match strength, then depth, plain name and id (lower case
+    before upper on a tie, as `localeCompare` orders them). `pool` replaces the
+    catalogue (the shared case table, `tests/data/catalogue_search_cases.json`)."""
     q = _norm(query)
     if not q:
         return []
@@ -130,7 +135,7 @@ def search(
         t = asset_type(asset_type_id)
         classes = set(t.components) if t is not None else set()
     hits: list[tuple[C.Entry, str]] = []
-    for e in C.entries():
+    for e in C.entries() if pool is None else pool:
         if classes is not None and e.scope not in classes:
             continue
         if function is not None and function not in e.functions:
@@ -143,8 +148,10 @@ def search(
             -(1 if function and h[0].functions.get(function) == "needs" else 0),
             -SCORE[h[1]],
             DEPTH_RANK.get(h[0].depth, 9),
-            h[0].plain_name,
-            h[0].id,
+            h[0].plain_name.casefold(),
+            h[0].plain_name.swapcase(),
+            h[0].id.casefold(),
+            h[0].id.swapcase(),
         )
     )
     return [e for e, _ in hits[:limit]]
@@ -155,19 +162,26 @@ def _carrier_re(pattern: str) -> re.Pattern[str]:
 
 
 def asset_type_of(
-    cls: str, row: dict[str, Any], bus_carrier: Callable[[str], str | None]
+    cls: str,
+    row: dict[str, Any],
+    bus_carrier: Callable[[str], str | None],
+    types: tuple[AssetTypeSpec, ...] = ASSET_TYPES,
 ) -> AssetTypeSpec | None:
     """The first asset type whose rule matches component `row` of class `cls`.
 
     `bus_carrier(name)` gives a bus's carrier (None for an unknown bus); a Bus
-    reads its own. A missing carrier reads as "" (a Bus: "AC"), as in the frontend."""
+    reads its own. A missing carrier reads as "" (a Bus: "AC"), as in the frontend.
+    Unlike the frontend's `matchType` it has no site members, so a rule's `port`
+    is not checked: a Link seen only from the bus its rule does not stand at
+    still takes that rule's type (`tests/data/asset_type_match_cases.json`
+    lists the cases where the two answer differently)."""
     if cls == "Bus":
         carrier = bus_carrier(str(row.get("name", ""))) or row.get("carrier") or "AC"
     else:
         carrier = row.get("carrier") or ""
     carrier = str(carrier)
     has_bus2 = cls == "Link" and bool(row.get("bus2") or "")
-    for t in ASSET_TYPES:
+    for t in types:
         for m in t.match:
             if m.component != cls:
                 continue
