@@ -7,6 +7,7 @@
 // server refusal lands on the same field. Nothing asked here is asked again
 // later in Guided: the Site card shows it read-only.
 import { emptyLocation, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
+import { useUIStore } from '../../../store/uiStore'
 import { SiteLocationFields, showLocationSaveFailure } from './SiteLocationFields'
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -59,6 +60,7 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
   onCancel: () => void
   seed: { params: SiteParams; entered: string[] } | null
 }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const [draft, setDraft] = useState<SiteDraft>(
     () => (seed ? draftFromSite(seed.params, seed.entered) : initialDraft(form)))
   const [server, setServer] = useState<{ field: string; message: string } | null>(null)
@@ -284,7 +286,7 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" data-testid="site-create" onClick={submit}
-          disabled={create.isPending || disabledReason !== null || nErrors > 0}
+          disabled={create.isPending || disabledReason !== null || nErrors > 0 || viewerReadOnly}
           title={disabledReason ?? undefined}
           className="rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {create.isPending ? 'Creating…' : 'Create the site'}

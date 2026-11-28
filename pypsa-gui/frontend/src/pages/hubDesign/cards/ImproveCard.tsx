@@ -123,6 +123,7 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
 }
 
 export function ImproveCard() {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   // The Verdict's cheaper battery duration, repeated as a row; its link stays
@@ -199,7 +200,7 @@ export function ImproveCard() {
         </span>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" data-testid="hub-improve-fmea"
-            onClick={() => sweep.mutate()} disabled={sweep.isPending}
+            onClick={() => sweep.mutate()} disabled={sweep.isPending || viewerReadOnly}
             className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
             <ShieldAlert size={12} /> {sweep.isPending ? 'Starting…' : 'Check risks (FMEA)'}
           </button>

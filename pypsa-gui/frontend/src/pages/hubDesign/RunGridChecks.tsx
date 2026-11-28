@@ -5,6 +5,7 @@
 // the tile (ChaptersSection polls the campus run). An unsolved project gets the
 // "Run the solve" state, as in the panel; any other refusal is shown as said.
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useUIStore } from '../../store/uiStore'
 import { Play } from 'lucide-react'
 import { campusApi, errorText } from '../../api/campusElectrical'
 import { CAMPUS_KEY, DEFAULT_SETTINGS } from '../CampusElectricalPanel'
@@ -16,6 +17,7 @@ export default function RunGridChecks({ project, again, disabled }: {
   again: boolean
   disabled: boolean
 }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const qc = useQueryClient()
   const run = useMutation({
     mutationFn: async () => {
@@ -29,7 +31,7 @@ export default function RunGridChecks({ project, again, disabled }: {
   return (
     <div className="flex flex-col gap-1" data-testid="hub-run-grid-checks">
       <button type="button" data-testid="hub-run-grid-checks-button"
-        onClick={() => run.mutate()} disabled={disabled || run.isPending}
+        onClick={() => run.mutate()} disabled={disabled || run.isPending || viewerReadOnly}
         className="self-start inline-flex items-center gap-1 rounded border border-accent/60 px-2 py-1 text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50">
         <Play size={11} /> {run.isPending ? 'Starting…' : again ? 'Run the grid checks again' : 'Run grid checks'}
       </button>

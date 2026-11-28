@@ -65,6 +65,7 @@ export function isDispatchLimitTarget(t: Pick<FlowTarget, 'section' | 'field'> |
 
 /** The reserve shares and minimum renewable fraction, edited in place; Save writes only the changed fields. */
 export function DispatchLimitsEditor({ onDone }: { onDone?: () => void }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const cfg = useQuery({
@@ -97,7 +98,7 @@ export function DispatchLimitsEditor({ onDone }: { onDone?: () => void }) {
       </div>
       <div className="flex items-center gap-2">
         <button type="button" data-testid="island-dispatch-save" className={SAVE}
-          disabled={!changed || refused || save.isPending} onClick={() => save.mutate()}>Save</button>
+          disabled={!changed || refused || save.isPending || viewerReadOnly} onClick={() => save.mutate()}>Save</button>
         {onDone && <button type="button" className={BTN} onClick={() => { setPatch({}); onDone() }}>Cancel</button>}
         {save.isError && <span className="text-[12px] text-danger" role="alert">{errorText(save.error)}</span>}
       </div>
@@ -111,6 +112,7 @@ export function DispatchLimitsEditor({ onDone }: { onDone?: () => void }) {
 function Scenarios({ name, config, revision, reload }: {
   name: string; config: IslandConfig; revision: string | null | undefined; reload: () => void
 }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const save = useIslandPatch(name, revision)
   const chosen = config.requirements.scenarios
   const toggle = (sc: IslandScenario) =>
@@ -120,7 +122,7 @@ function Scenarios({ name, config, revision, reload }: {
       <div className="flex flex-wrap gap-3 text-[12px]">
         {ISLAND_SCENARIOS.map(sc => (
           <label key={sc} className="flex gap-1 items-center">
-            <input type="checkbox" checked={chosen.includes(sc)} disabled={save.isPending}
+            <input type="checkbox" checked={chosen.includes(sc)} disabled={save.isPending || viewerReadOnly}
               onChange={() => toggle(sc)} />
             {islandScenarioLabel(sc)}
           </label>
