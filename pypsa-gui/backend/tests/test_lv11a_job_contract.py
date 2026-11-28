@@ -1146,14 +1146,22 @@ def test_a_superseded_queue_solve_reads_interrupted_not_cancelled(baseline):
     assert (view["status"], view["outcome"]) == ("aborted", "interrupted")
     assert view["terminal"] and view["warnings"] == ["outcome_superseded"]
     waited = chat_tools.wait_for_job(job_id, 0)
-    assert (waited["outcome"], waited["warnings"]) == (view["outcome"], view["warnings"])
+    assert (waited["outcome"], waited["warnings"]) == (
+        view["outcome"],
+        view["warnings"],
+    )
     assert waited["terminal"] and waited["job"]["condition"] == "superseded"
     out = ja.cancel_job(job_id, actor_id=actor)
     assert out["cancel"] == "already_finished"
-    assert (out["job"]["outcome"], out["job"]["warnings"]) == ("interrupted", ["outcome_superseded"])
+    assert (out["job"]["outcome"], out["job"]["warnings"]) == (
+        "interrupted",
+        ["outcome_superseded"],
+    )
 
 
-@pytest.mark.parametrize("condition", [None, "optimal", "infeasible", "queue_error", "Superseded"])
+@pytest.mark.parametrize(
+    "condition", [None, "optimal", "infeasible", "queue_error", "Superseded"]
+)
 def test_any_other_aborted_queue_solve_stays_cancelled(baseline, condition):
     ctx, _project_id, path = baseline
     job_id, job = _queue(ctx, path)
