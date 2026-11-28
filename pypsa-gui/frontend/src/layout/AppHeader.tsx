@@ -1153,7 +1153,7 @@ export default function AppHeader() {
         // reason in the same place (as Guided's section 9 shows it).
         const studyBlocked = verdictRun && (goalStudy.built.body === null || goalStudy.vollMissing)
         const studyReason = goalStudy.problem
-          ?? (goalStudy.vollMissing ? 'Set the value of lost load (Solver settings) to run the study.' : 'The study inputs are still being read.')
+          ?? (goalStudy.vollMissing ? 'Set a value of lost load to run the study.' : 'The study inputs are still being read.')
         const gated = (runGate.blocked || studyBlocked) && !amber
         const gateReason = runGate.blocked ? runGate.reason : studyReason
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
@@ -1161,8 +1161,8 @@ export default function AppHeader() {
           {gated && (
             <button type="button" data-testid="run-blocker"
               onClick={() => runGate.blocker && runGate.blocked ? openFlowTarget(runGate.blocker.target) : openSectionInExpert('readiness')}
-              title="Show the field to fix"
-              className="max-w-[18rem] truncate text-[11px] text-warn underline-offset-2 hover:underline">
+              title={`${gateReason ?? ""} Show the field to fix`}
+              className="max-w-[18rem] shrink-0 truncate text-[11px] text-warn underline-offset-2 hover:underline">
               {gateReason}
             </button>
           )}
