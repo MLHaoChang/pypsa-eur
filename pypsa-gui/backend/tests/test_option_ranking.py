@@ -145,6 +145,8 @@ def test_ids_show_only_where_labels_clash():
 def test_report_variants_chat_words_are_owned():
     from services import not_via_chat as N
 
+    TITLE = "Report variants (top 3 by NPV, greatest IRR)"
+
     def first(*words):
         return [m["title"] for m in N.matches(set(words))]
 
@@ -152,6 +154,11 @@ def test_report_variants_chat_words_are_owned():
     assert "Report variants (top 3 by NPV, greatest IRR)" not in first("generate", "a", "report")
     assert "Report variants (top 3 by NPV, greatest IRR)" not in first("what", "is", "the", "irr", "of", "option", "b")
     assert first("report", "variant")[0].startswith("Report variants")
+    for ask in ("create a variant of this scenario", "compare the template variants",
+                "ranked list of generators by capacity"):
+        assert TITLE not in first(*ask.split()), ask
+    for ask in ("a report with the top 3 options by npv", "report the option with the greatest irr"):
+        assert first(*ask.split())[:1] == [TITLE], ask
 
 
 def test_a_tie_over_the_cut_off_is_said_and_unranked_columns_carry_their_own_reason():

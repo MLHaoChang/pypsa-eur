@@ -603,6 +603,16 @@ def _asks_about_range_flags(words: set[str]) -> bool:
     return 'implausible' in words or ('range' in words and bool(words & _RANGE_FLAG_PAIRS))
 
 
+def _asks_for_a_report_variant(words: set[str]) -> bool:
+    """A report ranked by NPV or IRR: the phrase "report variant", or a report word with a
+    ranking word and NPV or IRR. "A variant of this scenario" or "ranked generators" is not."""
+    report = bool(words & {'report', 'reports'})
+    if report and words & {'variant', 'variants'}:
+        return True
+    return (report and bool(words & {'top', 'ranked', 'ranking', 'rank', 'greatest', 'highest', 'best'})
+            and bool(words & {'npv', 'irr'}))
+
+
 def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
 
@@ -621,6 +631,8 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
             continue
         if entry['id'] == 'import_range_flags' and not _asks_about_range_flags(words):
+            continue
+        if entry['id'] == 'report_variants' and not _asks_for_a_report_variant(words):
             continue
         hits = len(words & entry['keywords'])
         if hits:
