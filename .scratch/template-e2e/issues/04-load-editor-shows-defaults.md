@@ -25,4 +25,4 @@ Journey fit: set up site (section 4) → readiness → results. Peaks per period
 - (UX) Where each moved decision lands: IT load, PUE and critical share in section 4 (on the load row); backup mode and power architecture (DC only) in section 5. The unit is part of the field label ("Peak load (t/h)").
 
 - Follow-up (UX 34, not blocking): the AddForm Demand and Energy capacity labels do not yet follow a tonne bus's unit.
-- Shots (harness render of LoadSeriesEditor with stubbed API): .scratch/template-e2e/shots/04-load-editor-{tonne-guided,tonne-expert,mw-guided}.png
+- Shots (harness render of LoadSeriesEditor with stubbed API): .scratch/template-e2e/shots/04-load-editor-{tonne-guided,tonne-expert,mw-guided,nh3-guided}.small.png

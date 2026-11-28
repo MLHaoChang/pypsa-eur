@@ -182,10 +182,11 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
               </optgroup>
             </select>
           </label>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="w-20 text-muted">Scale</span>
             <Seg value={scaleKind} onChange={setScaleKind}
-              options={[{ value: 'peak', label: peakLabel }, { value: 'energy', label: energyLabel }]} />
+              options={[{ value: 'peak', label: <span className="whitespace-nowrap">{peakLabel}</span> },
+                { value: 'energy', label: <span className="whitespace-nowrap">{energyLabel}</span> }]} />
             <input aria-label={scaleKind === 'peak' ? peakLabel : energyLabel} className={`${INPUT} w-24`}
               placeholder={scaleKind === 'peak' && current?.peak != null ? `now ${Number(current.peak.toFixed(2))}` : ''}
               inputMode="decimal" value={scale} onChange={e => setScale(e.target.value)} />
