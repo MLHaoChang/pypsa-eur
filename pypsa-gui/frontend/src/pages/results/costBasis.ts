@@ -65,7 +65,7 @@ export function guidedCostWords(status: Basis | null | undefined, multiPeriod: b
   // A run recorded before its basis was: no basis is claimed (GK B3 on #2140).
   if (status?.objective_basis === 'unknown') {
     return { label: multiPeriod ? 'Cost over the periods' : 'Yearly cost',
-      basis: 'how it was counted was not recorded; run the optimisation again to see it' }
+      basis: 'how it was counted was not recorded: run the optimisation again to see it' }
   }
   if (status?.objective_discounted_to != null) {
     return { label: 'Cost over the plan (discounted)', basis: `discounted to ${status.objective_discounted_to}` }

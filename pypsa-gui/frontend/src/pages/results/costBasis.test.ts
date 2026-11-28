@@ -157,7 +157,7 @@ describe("Guided's cost words (UX 34 on #2140)", () => {
     for (const multi of [true, false]) {
       const w = guidedCostWords({ objective_basis: 'unknown', objective_discounted_to: null }, multi)
       expect(w.label).toBe(multi ? 'Cost over the periods' : 'Yearly cost')
-      expect(w.basis).toBe('how it was counted was not recorded; run the optimisation again to see it')
+      expect(w.basis).toBe('how it was counted was not recorded: run the optimisation again to see it')
       expect(`${w.label} ${w.basis}`).not.toMatch(/discounted|summed|solve|LP|objective/)
     }
   })
