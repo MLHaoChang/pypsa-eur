@@ -11,8 +11,14 @@ import { StatePill } from './ResultState'
 
 export type SourceRun = 'dispatch' | 'study'
 
-const RUN_NAME: Record<SourceRun, string> = {
+const EXPERT_RUN_NAME: Record<SourceRun, string> = {
   dispatch: 'the dispatch solve',
+  study: 'the reliability study',
+}
+
+/** Guided names the dispatch solve by what it does (UX 34 on #2140): no "solve" in Guided. */
+const GUIDED_RUN_NAME: Record<SourceRun, string> = {
+  dispatch: 'the optimisation',
   study: 'the reliability study',
 }
 
@@ -35,10 +41,13 @@ export interface SourceRunLineProps {
    *  button that runs it in place (no "›"; `disabled` while a run is queued or going: never a second run). */
   missing?: { run: SourceRun; action?: { label: string; onClick: () => void; kind?: 'link' | 'run'; disabled?: boolean } }
   testId?: string
+  /** Guided's words for the runs; Expert's by default. */
+  mode?: 'guided' | 'expert'
 }
 
-export default function SourceRunLine({ source, at, outOfDate = false, missing, testId = 'source-run' }: SourceRunLineProps) {
+export default function SourceRunLine({ source, at, outOfDate = false, missing, testId = 'source-run', mode = 'expert' }: SourceRunLineProps) {
   const stamp = runStamp(at)
+  const RUN_NAME = mode === 'guided' ? GUIDED_RUN_NAME : EXPERT_RUN_NAME
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted" data-testid={testId}>
       {source && <span data-testid={`${testId}-from`}>From {RUN_NAME[source]}{stamp ? `, ${stamp}` : ''}</span>}

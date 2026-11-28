@@ -29,7 +29,8 @@ import { solveWords } from './solveWords'
 import HeadlineStrip, { useHeadlineKpis } from './HeadlineStrip'
 import { COST_WORDS, totalCostWords } from './headlineWords'
 import {
-  gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
+  currencyInScaleOf, gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName,
+  totalCostBasis,
 } from './costBasis'
 import { getObjectiveDecomposition } from '../../api/results'
 import { NOT_RECORDED, NotRecordedDash, NotRecordedNote } from './NotRecorded'
@@ -162,17 +163,19 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
     queryKey: nk(project, 'results', 'objective_decomposition'), queryFn: getObjectiveDecomposition,
     enabled: status?.objective != null && status?.objective_basis !== 'system_cost', retry: false,
   })
-  const gapReasons = objectiveGapReasons(decomposition, v => fmtCurrency(v))
+  // Every part of the line in the objective's own scale, so they visibly add up (UX 34 on #2140).
+  const lineMoney = currencyInScaleOf(status?.objective)
+  const gapReasons = objectiveGapReasons(decomposition, lineMoney)
   const lpConstant = objectiveConstant(decomposition)
   // The clauses after the figure, each a plain statement joined by "·" (UX 34): its basis, then why it is
   // not the total (the first reason says from which figure), or the constant Guided's figure leaves out.
   const objectiveWords: string[] = decompositionFailed
     ? [objectiveBasis(status), 'The cost breakdown could not be read. Try again in a moment.']
     : gapReasons.length > 0
-      ? [`from the total system cost ${fmtCurrency(decomposition?.cost_breakdown_total)}, ${gapReasons[0].words}`,
+      ? [`from the total system cost ${lineMoney(decomposition?.cost_breakdown_total)}, ${gapReasons[0].words}`,
         ...gapReasons.slice(1).map(r => r.words)]
       : [objectiveBasis(status),
-        ...(lpConstant != null ? [`includes existing assets' fixed cost (${fmtCurrency(lpConstant)}), which Guided's yearly cost leaves out`] : [])]
+        ...(lpConstant != null ? [`includes existing assets' fixed cost (${lineMoney(lpConstant)}), which Guided's yearly cost leaves out`] : [])]
   // Shown beside the strip only when it says something the strip does not (K1: never the same figure twice).
   const objectiveExplains = decompositionFailed || gapReasons.length > 0 || lpConstant != null
     || status?.objective_basis === 'unknown'
@@ -238,8 +241,8 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               the strip's figure under another name (no gap to explain), it is not repeated (K1). */}
           {status.objective != null && (!inStrip('system_cost') || objectiveExplains) && (
             <span data-testid="summary-objective"
-              title="The solve's own figure, as in the solve message and the status bar. The total system cost is every asset's annualised fixed cost plus operating cost from n.statistics(), summed over the periods' years and not discounted; shed load is in neither.">
-              {objectiveName(status)} <span className="font-mono text-text">{fmtCurrency(status.objective)}</span>
+              title="The solve's own figure, as in the solve message and the status bar. The total system cost is every asset's annualised fixed cost plus operating cost, summed over the periods' years and not discounted; shed load is in neither.">
+              {objectiveName(status)} <span className="font-mono text-text">{lineMoney(status.objective)}</span>
               {objectiveWords.map(w => ` · ${w}`).join('')}
             </span>
           )}

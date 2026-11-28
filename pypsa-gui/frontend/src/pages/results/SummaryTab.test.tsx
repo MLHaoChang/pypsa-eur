@@ -404,6 +404,20 @@ describe('the LP objective beside the total system cost (template-e2e 18)', () =
     expect(screen.getByTestId('headline-system_cost').textContent).toContain('summed over the periods, not discounted')
   })
 
+  it('gives every part of the line in the objective\'s scale, so they add up on sight (UX 34 on #2140)', async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [{ ...STRIP.cards[0], value: 8.6312e9 }] })
+    api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 419.52e6,
+      solve_time: 4.2, objective_basis: 'lp_objective', objective_discounted_to: 2027 })
+    api.getObjectiveDecomposition.mockResolvedValue({ ...DEC, n_objective: 419.52e6, lp_total: 419.52e6,
+      cost_breakdown_total: 8631.2e6, gap_eur: -8211.68e6, nonextendable_fixed_cost_eur: 0,
+      period_weighting_adjustment_eur: -8211.68e6, discount: { ref_year: 2027, real_rate: 0.07 } })
+    renderTab()
+    const line = await screen.findByTestId('summary-objective')
+    expect(line.textContent).toBe('LP objective €419.52 M'
+      + ' · from the total system cost €8,631.20 M, discounting to 2027 at 7.0 % real takes €8,211.68 M off')
+    expect(line.getAttribute('title')).not.toMatch(/n\.statistics|n\.objective/)
+  })
+
   it('keeps the objective when the breakdown cannot be read, and never says not run', async () => {
     api.getHeadlineKpis.mockResolvedValue(STRIP)
     api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 120.29e6,

@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ObjectiveDecomposition } from '../../api/results'
 import {
+  currencyInScaleOf, guidedCostWords,
   gridSupplyWords, objectiveFigure, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
 } from './costBasis'
 
@@ -121,5 +122,26 @@ describe("the run's figure (status bar and toast)", () => {
     expect(objectiveFigure(-830_400)).toBe('-€\u00a0830\u00a0k')
     expect(objectiveFigure(null)).toBeNull()
     expect(objectiveFigure(Number.NaN)).toBeNull()
+  })
+})
+
+describe('one scale on a line (UX 34 on #2140)', () => {
+  it('gives every part in the reference figure\'s scale, grouped, minus first', () => {
+    const m = currencyInScaleOf(419.52e6)
+    expect(m(8_631.2e6)).toBe('€8,631.20 M')
+    expect(m(212.06e6)).toBe('€212.06 M')
+    expect(m(-7_990e6)).toBe('-€7,990.00 M')
+    expect(m(null)).toBe('—')
+    expect(currencyInScaleOf(5e9)(4.2e8)).toBe('€0.42 B')
+  })
+})
+
+describe("Guided's cost words (UX 34 on #2140)", () => {
+  it('names a discounted plan, an undiscounted plan and a year, never solve, LP or objective', () => {
+    expect(guidedCostWords({ objective_basis: 'lp_objective', objective_discounted_to: 2027 }, true))
+      .toEqual({ label: 'Cost over the plan (discounted)', basis: 'discounted to 2027' })
+    expect(guidedCostWords({ objective_basis: 'system_cost', objective_discounted_to: null }, true).label).toBe('Cost over the plan')
+    expect(guidedCostWords({ objective_basis: 'lp_objective', objective_discounted_to: null }, false)).toEqual({ label: 'Yearly cost' })
+    expect(guidedCostWords(null, false).label).toBe('Yearly cost')
   })
 })

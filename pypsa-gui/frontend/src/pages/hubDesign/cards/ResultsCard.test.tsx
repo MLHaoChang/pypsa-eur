@@ -452,11 +452,25 @@ describe('ResultsCard source run (control-strategy 06)', () => {
     const cost = await screen.findByTestId('hub-results-dispatch-cost')
     expect(cost.textContent).toContain('3.5')
     expect(cost.getAttribute('data-state')).toBe('ready')
-    expect(screen.getByTestId('hub-results-source-from').textContent).toMatch(/^From the dispatch solve, 2026-11-1[78] \d\d:\d\d$/)
+    expect(screen.getByTestId('hub-results-source-from').textContent).toMatch(/^From the optimisation, 2026-11-1[78] \d\d:\d\d$/)
     expect(screen.getByTestId('hub-results-source-missing').textContent)
       .toBe('The reliability study has not run·Go to Goal and run the study ›')
+    // Guided's cost words (UX 34 on #2140): a single period's figure is a year's; no solve, LP or objective.
+    expect(cost.textContent).toContain('Yearly cost')
+    expect(screen.getByTestId('hub-results-dispatch').textContent).not.toMatch(/solve|LP|objective|Total system cost/)
     // The headline's own "Not run yet" is gone; the other chapters keep theirs.
     expect(screen.getByTestId('hub-card-results').textContent).not.toContain('The study writes its verdict, cost and risks here.')
+  })
+
+  it('a discounted multi-period solve reads as the plan\'s cost, discounted, in Guided words (UX 34 on #2140)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved({ objective_basis: 'lp_objective', objective_discounted_to: 2027 })
+    flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    const cost = await screen.findByTestId('hub-results-dispatch-cost')
+    await waitFor(() => expect(cost.textContent).toContain('Cost over the plan (discounted)'))
+    expect(cost.textContent).toContain('discounted to 2027')
+    expect(screen.getByTestId('hub-results-dispatch').textContent).not.toMatch(/solve|LP|objective|Total system cost/)
   })
 
   it('a solve older than the inputs shows its figure out of date, never as current (GK B3 C2)', async () => {
@@ -474,7 +488,7 @@ describe('ResultsCard source run (control-strategy 06)', () => {
     solved({ solved_at: null })
     flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
     mount()
-    expect((await screen.findByTestId('hub-results-source-from')).textContent).toBe('From the dispatch solve')
+    expect((await screen.findByTestId('hub-results-source-from')).textContent).toBe('From the optimisation')
   })
 
   it('with the study and no solve, names the study and offers the solve', async () => {
@@ -486,7 +500,7 @@ describe('ResultsCard source run (control-strategy 06)', () => {
     const line = await screen.findByTestId('hub-results-source')
     expect(within(line).getByTestId('hub-results-source-from').textContent).toBe('From the reliability study')
     await waitFor(() => expect(within(line).getByTestId('hub-results-source-missing').textContent)
-      .toBe('The dispatch solve has not run·Run the optimisation'))
+      .toBe('The optimisation has not run·Run the optimisation'))
     fireEvent.click(within(line).getByTestId('hub-results-source-action'))
     expect(run).toHaveBeenCalledTimes(1)
   })

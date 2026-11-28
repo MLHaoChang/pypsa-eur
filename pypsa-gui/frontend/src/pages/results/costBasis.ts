@@ -14,6 +14,7 @@
 import type { ObjectiveDecomposition } from '../../api/results'
 import type { FlowSection } from '../../api/flow'
 import { money } from '../../utils/money'
+import { signFirstEuro } from '../../utils/format'
 import type { SimulationStatus } from '../../api/types'
 
 /** The run's figure in the status bar's notation (`money()`); signed, the minus before the symbol
@@ -41,6 +42,29 @@ export function objectiveBasis(status: Basis | null | undefined): string {
   if (status?.objective_basis === 'unknown') return 'its basis was not recorded; run the solve again to see it'
   if (status?.objective_discounted_to != null) return `discounted to ${status.objective_discounted_to}`
   return 'not discounted'
+}
+
+/** A euro formatter fixed to the scale `fmtCurrency` gives `ref` (B, M, k), so the parts of one line add up
+ *  on sight (UX 34 on #2140): "€8,631.20 M … €212.06 M off … €419.52 M". Grouped, two decimals. */
+export function currencyInScaleOf(ref: number | null | undefined): (eur: number | null | undefined) => string {
+  const a = ref != null && Number.isFinite(ref) ? Math.abs(ref) : 0
+  const [div, unit] = a >= 1e9 ? [1e9, ' B'] : a >= 1e6 ? [1e6, ' M'] : a >= 1e3 ? [1e3, ' k'] : [1, '']
+  return eur => {
+    if (eur == null || !Number.isFinite(eur)) return '—'
+    const body = (Math.abs(eur) / div).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return signFirstEuro(eur, `${body}${unit}`)
+  }
+}
+
+/** Guided's name for the run's figure, and its basis line (UX 34 on #2140): Guided's own cost words, never
+ *  "solve", "LP" or "objective". A discounted multi-period figure is the plan's cost; a single period's is a
+ *  year's. */
+export function guidedCostWords(status: Basis | null | undefined, multiPeriod: boolean): { label: string; basis?: string } {
+  if (status?.objective_discounted_to != null) {
+    return { label: 'Cost over the plan (discounted)', basis: `discounted to ${status.objective_discounted_to}` }
+  }
+  if (multiPeriod) return { label: 'Cost over the plan', basis: 'summed over the periods, not discounted' }
+  return { label: 'Yearly cost' }
 }
 
 /** The total system cost's basis line: what the solve covered, and on a multi-period solve that it is a
