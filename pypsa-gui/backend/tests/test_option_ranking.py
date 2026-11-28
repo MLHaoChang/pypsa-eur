@@ -48,7 +48,7 @@ def test_greatest_irr_names_unranked_with_reason():
 def test_too_few_rankable_options_names_the_excluded():
     with pytest.raises(OR.VariantError) as e:
         OR.rank([_f("a", 1.0, None), _f("b", 2.0, None), _f("c", 3.0, 0.1)], "greatest_irr")
-    assert e.value.kind == "report_variant_too_few_options" and "a, b" in e.value.message
+    assert e.value.kind == "report_variant_too_few_options" and "A, B" in e.value.message
 
 
 @pytest.mark.parametrize("variant,n", [("nope", None), ("greatest_irr", 3), (None, 3),
@@ -140,3 +140,25 @@ def test_ids_show_only_where_labels_clash():
             _f("c", 3.0, 0.3)]
     cells = [row[1] for row in OR.table_rows(OR.rank(figs, "top_npv"))]
     assert cells == ["C", "Same (b)", "Same (a)"]
+
+
+def test_report_variants_chat_words_are_owned():
+    from services import not_via_chat as N
+
+    def first(*words):
+        return [m["title"] for m in N.matches(set(words))]
+
+    assert "Report variants (top 3 by NPV, greatest IRR)" not in first("run", "the", "business", "hours", "report")
+    assert "Report variants (top 3 by NPV, greatest IRR)" not in first("generate", "a", "report")
+    assert "Report variants (top 3 by NPV, greatest IRR)" not in first("what", "is", "the", "irr", "of", "option", "b")
+    assert first("report", "variant")[0].startswith("Report variants")
+
+
+def test_a_tie_over_the_cut_off_is_said_and_unranked_columns_carry_their_own_reason():
+    figs = [_f("a", 5.0, 0.1), _f("b", 5.0, 0.1), _f("c", 9.0, 0.2), _f("d", None, 0.3)]
+    r = OR.rank(figs, "top_npv", 2)
+    assert [x.rank for x in r.rows] == [1, 2, 2] and "tie on a rank are all shown" in r.rule
+    last = OR.table_rows(r)[-1]
+    assert last[2] == f"— ({OR.NO_NPV_REASON})" and last[3] == "30.0 %"
+    cut = OR.rank([_f("a", 1.0, 0.1), _f("b", 2.0, 0.2), _f("c", None, None)], "top_npv", 1)
+    assert f"— ({OR.NO_IRR_REASON})" == OR.table_rows(cut)[-1][3]

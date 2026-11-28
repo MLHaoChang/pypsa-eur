@@ -29,7 +29,7 @@ MAX_N = 10
 SECTION_ID = "option_ranking"
 
 NO_IRR_REASON = "no IRR: the cash flows never turn positive"
-NO_NPV_REASON = "no NPV: the option was not solved"
+NO_NPV_REASON = "no NPV: the study has no figure for this option"
 
 
 class VariantError(ValueError):
@@ -48,6 +48,7 @@ class Row:
     irr: float | None
     reason: str | None
     rank: int | None  # None: not ranked
+    irr_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,13 +101,20 @@ def option_figures(report: DecisionReport, cases: dict[str, InvestmentCase]) -> 
     return out
 
 
+def _names(figures: list[dict]) -> list[str]:
+    """The label alone, with the id only where labels clash (one rule for table and refusal)."""
+    labels = [f["label"] for f in figures]
+    return [f"{f['label']} ({f['option_id']})" if labels.count(f["label"]) > 1 else f["label"]
+            for f in figures]
+
+
 def rank(figures: list[dict], variant: str, n: int | None = None) -> Ranking:
     check_request(variant, n)
     ranked_key, other = ("npv", "irr") if variant == TOP_NPV else ("irr", "npv")
     have = [f for f in figures if f[ranked_key] is not None]
     lacking = sorted((f for f in figures if f[ranked_key] is None), key=lambda f: f["option_id"])
     if len(have) < 2:
-        names = ", ".join(f["option_id"] for f in lacking) or "none"
+        names = ", ".join(_names(lacking)) or "none"
         raise VariantError(
             "report_variant_too_few_options",
             f"Fewer than 2 options have an {ranked_key.upper()} to rank. Left out: {names}.")
@@ -123,13 +131,14 @@ def rank(figures: list[dict], variant: str, n: int | None = None) -> Ranking:
         rows.append(Row(f["option_id"], f["label"], f["npv"], f["irr"], None, rank_no))
     reason = NO_NPV_REASON if ranked_key == "npv" else NO_IRR_REASON
     unranked = [Row(f["option_id"], f["label"], f["npv"], f["irr"],
-                    f["irr_reason"] or reason if ranked_key == "irr" else reason, None)
+                    f["irr_reason"] or reason if ranked_key == "irr" else reason, None,
+                    f["irr_reason"] or NO_IRR_REASON)
                 for f in lacking]
     return Ranking(variant, n if variant == TOP_NPV else None,
-                   _rule(variant, limit, len(have), bool(unranked)), rows, unranked)
+                   _rule(variant, limit, len(have), bool(unranked), len(rows) > limit), rows, unranked)
 
 
-def _rule(variant: str, limit: int, available: int, has_unranked: bool) -> str:
+def _rule(variant: str, limit: int, available: int, has_unranked: bool, tied: bool = False) -> str:
     what = "NPV" if variant == TOP_NPV else "IRR"
     text = (f"Ranks the options by {what}, highest first. From the decision study's "
             "option results.")
@@ -139,6 +148,8 @@ def _rule(variant: str, limit: int, available: int, has_unranked: bool) -> str:
         text += f" Shows all {available} options."
     else:
         text += f" The report shows the top {limit}."
+    if tied:
+        text += " Options that tie on a rank are all shown."
     if has_unranked:
         text += f" Options without a {what} are listed last and not ranked."
     return text
@@ -154,7 +165,7 @@ def table_rows(r: Ranking) -> list[list[str]]:
 
     rows = [[str(x.rank), name(x), num(x.npv), pct(x.irr)] for x in r.rows]
     rows += [["—", name(x),
-              num(x.npv) if x.npv is not None else f"— ({x.reason})",
-              pct(x.irr) if x.irr is not None else f"— ({x.reason})"]
+              num(x.npv) if x.npv is not None else f"— ({NO_NPV_REASON})",
+              pct(x.irr) if x.irr is not None else f"— ({x.irr_reason or NO_IRR_REASON})"]
              for x in r.unranked]
     return rows
