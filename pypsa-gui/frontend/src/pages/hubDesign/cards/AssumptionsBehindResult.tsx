@@ -42,8 +42,8 @@ export function assumptionRows(
 export function AssumptionsBehindResult({ testId = 'results-assumptions' }: { testId?: string }) {
   const { template } = useHubTemplate()
   const { study } = useHubStudy()
-  if (!template) return null
   const [open, setOpen] = useState(false)
+  if (!template) return null
   const rows = assumptionRows(template.ledger, Array.isArray(study?.assumptions) ? study.assumptions : undefined)
   // True only while a template default still stands: a ledger row not yet stated by the person.
   const synthetic = (template.ledger ?? []).some(r => r.source === 'assumed' || r.source === 'illustrative')
@@ -56,7 +56,7 @@ export function AssumptionsBehindResult({ testId = 'results-assumptions' }: { te
       </span>
       {rows.length === 0 ? (
         <p data-testid={`${testId}-none`} className="text-muted">
-          {notRecorded ? 'This study did not record the defaults it assumed; run it again to list them.' : 'No assumed inputs.'}
+          {notRecorded ? 'This study did not record the defaults it assumed. Run it again to list them.' : 'No assumed inputs.'}
         </p>
       ) : (
         <ul className="flex flex-col gap-1">
@@ -70,8 +70,9 @@ export function AssumptionsBehindResult({ testId = 'results-assumptions' }: { te
       )}
       {rows.length > FOLDED_AT && (
         <button type="button" data-testid={`${testId}-toggle`} onClick={() => setOpen(o => !o)}
-          className="self-start text-link hover:underline">
-          {open ? 'Show fewer' : `(${rows.length - FOLDED_AT} more) Show all`}
+          className="self-start">
+          {open ? <span className="underline">Show fewer</span>
+            : <><span className="text-muted">({rows.length - FOLDED_AT} more)</span> <span className="text-text underline">Show all</span></>}
         </button>
       )}
     </div>

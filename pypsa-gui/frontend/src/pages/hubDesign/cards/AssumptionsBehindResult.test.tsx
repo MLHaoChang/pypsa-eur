@@ -28,7 +28,7 @@ describe('AssumptionsBehindResult', () => {
   })
   it('says so when an older study recorded none', () => {
     mount({ ...SITE_TEMPLATE, ledger: [] }, { status: 'done' })
-    expect(screen.getByTestId('results-assumptions-none').textContent).toMatch(/did not record/)
+    expect(screen.getByTestId('results-assumptions-none').textContent).toMatch(/did not record the defaults it assumed\./)
   })
   it('hides the synthetic line once nothing assumed stands, and names a label-less row plainly', () => {
     mount({ ...SITE_TEMPLATE, ledger: [{ item: 'power_factor', value: 0.9800000001, source: 'entered' },
@@ -45,8 +45,21 @@ describe('AssumptionsBehindResult', () => {
     const many = Array.from({ length: 7 }, (_, i) => ({ ...run, key: `k${i}`, label: `L${i}` }))
     mount({ ...SITE_TEMPLATE, ledger: [] }, { status: 'done', assumptions: many })
     expect(screen.getAllByTestId('results-assumptions-row')).toHaveLength(5)
-    fireEvent.click(screen.getByText('(2 more) Show all'))
+    expect(screen.getByTestId('results-assumptions-toggle').textContent).toBe('(2 more) Show all')
+    fireEvent.click(screen.getByTestId('results-assumptions-toggle'))
     expect(screen.getAllByTestId('results-assumptions-row')).toHaveLength(7)
+  })
+  it('renders when the template arrives after a first empty render (hook order)', () => {
+    vi.mocked(hub.useHubTemplate).mockReturnValue({ template: null } as never)
+    vi.mocked(hub.useHubStudy).mockReturnValue({ study: null } as never)
+    const { rerender } = render(<AssumptionsBehindResult />)
+    vi.mocked(hub.useHubTemplate).mockReturnValue({ template: SITE_TEMPLATE } as never)
+    rerender(<AssumptionsBehindResult />)
+    expect(screen.getByTestId('results-assumptions')).toBeTruthy()
+  })
+  it('reads a percent ledger value with its unit', () => {
+    mount({ ...SITE_TEMPLATE, ledger: [{ item: 'discount_rate', value: 7, unit: '%', source: 'assumed' }] }, { status: 'done', assumptions: [] })
+    expect(screen.getByTestId('results-assumptions-row').textContent).toContain('Discount rate: 7 %')
   })
   it('renders nothing without a template', () => {
     mount(null, null)
