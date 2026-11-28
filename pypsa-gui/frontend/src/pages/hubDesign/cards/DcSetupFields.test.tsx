@@ -64,7 +64,7 @@ describe('DcLoadFields', () => {
     await userEvent.clear(share)
     await userEvent.type(share, '90')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect((await screen.findByTestId('dc-load-refusal')).textContent).toContain('Critical share (%): ')
+    expect((await screen.findByTestId('dc-load-refusal')).textContent).toBe('Critical share (%): with the other shares, it adds up to more than 100 %. Lower it.')
     expect((share as HTMLInputElement).value).toBe('90')
   })
 

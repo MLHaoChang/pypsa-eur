@@ -23,6 +23,7 @@ interface DcSpec {
 
 const READ_ONLY_LINE = 'Read-only: you cannot change these values on this project.'
 const PUE_ERROR = 'PUE at design: enter 1 or more.'
+const SHARE_SUM_ERROR = 'Critical share (%): with the other shares, it adds up to more than 100 %. Lower it.'
 const SHARE_ERROR = 'Critical share (%): enter a value above 0 and up to 100.'
 
 const INPUT = 'h-6 rounded border border-border bg-bg px-1.5 text-xs text-text'
@@ -46,6 +47,7 @@ const REFUSAL_LABEL: Record<string, string> = {
 function refusalText(e: unknown): string {
   const text = errorText(e)
   const field = (e as { response?: { data?: { detail?: { field?: string } } } })?.response?.data?.detail?.field
+  if (field?.endsWith('critical_share') && /exceed/i.test(text)) return SHARE_SUM_ERROR
   const label = field ? REFUSAL_LABEL[field.replace(/^dc_load\./, '').split('.')[0]] : undefined
   return label && !text.startsWith(label) ? `${label}: ${text}` : text
 }
