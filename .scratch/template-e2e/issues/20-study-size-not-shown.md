@@ -3,7 +3,7 @@
 
 # 20 — The size of what the study chose to build is not shown in results
 
-Status: ready-for-agent
+Status: done (#2138, #2139)
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: blocks decision
 Journey fit: results → decide. A user cannot justify an investment without the MW/MWh to build.
