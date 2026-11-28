@@ -570,6 +570,7 @@ def review_latest(store: dict, record: dict | None, *,
     """
     from services.adequacy.eh_report import (
         eh_reference_design_http_payload,
+        record_report,
         mark_legacy_report,
     )
 
@@ -579,7 +580,7 @@ def review_latest(store: dict, record: dict | None, *,
     body, status = eh_reference_design_http_payload(store)
     source, stale = "stored report", False
     if status == 204 or not isinstance(body, dict):
-        body = (record or {}).get("report")
+        body = record_report(record)
         if isinstance(body, dict):
             body = mark_legacy_report(body)          # LC-30, as the route does
         source, stale = _STALE_SOURCE, True
