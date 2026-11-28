@@ -104,13 +104,17 @@ def test_the_status_reads_the_solves_stamp_not_todays_config(
     n, cfg = _solved("eh_h2_hub_staged")
     p0 = min(int(p) for p in n.investment_periods)
     assert _status_with(monkeypatch, n) == ("lp_objective", p0)
-    # The toggle and strategy changed after the solve: the figure is still the one solved.
-    monkeypatch.setitem(
-        simulation._state,
-        "solver_config",
-        dataclasses.replace(cfg, auto_discount_periods=False, solve_strategy="rolling"),
-    )
-    assert _status_with(monkeypatch, n) == ("lp_objective", p0)
+    # The toggle and strategy changed after the solve (GK B F3: full, then myopic): the figure
+    # is still the one solved.
+    for strategy in ("myopic", "rolling"):
+        monkeypatch.setitem(
+            simulation._state,
+            "solver_config",
+            dataclasses.replace(
+                cfg, auto_discount_periods=False, solve_strategy=strategy
+            ),
+        )
+        assert _status_with(monkeypatch, n) == ("lp_objective", p0)
 
 
 def test_the_status_names_a_myopic_or_rolling_figure_the_system_cost(monkeypatch):
@@ -191,6 +195,25 @@ def test_the_decomposition_reads_unknown_without_a_stamp_and_keeps_the_rolling_p
     assert od._bridge(n, cb, cfg)["discount"] == "unknown"
 
 
+def test_a_stamp_missing_a_period_reads_the_discount_unknown_not_a_500():
+    """GK B F5: the network's periods changed after the solve; the bridge says it cannot tell."""
+    from routers.projects import _solver_config_from_dict
+    from services.results import objective_decomposition as od
+    from services.solver.assumptions import SOLVE_DISCOUNT_META
+
+    tid = "eh_h2_hub_staged"
+    n = T.BUILDERS[tid]()
+    cfg = _solver_config_from_dict(T.solver_config(tid))
+    first = min(int(p) for p in n.investment_periods)
+    n.meta[SOLVE_DISCOUNT_META] = {
+        "ref_year": first,
+        "real_rate": 0.07,
+        "factors": {str(first): 3.0},
+    }
+    cb = {"total": 2.0e6, "opex": 1.0e6, "by_period": []}
+    assert od._bridge(n, cb, cfg)["discount"] == "unknown"
+
+
 @pytest.mark.live_solve
 def test_the_stamp_is_json_scalars_survives_a_save_and_leaves_the_fingerprint(
     tmp_path, reset_backend
@@ -240,41 +263,55 @@ def test_the_stamp_is_json_scalars_survives_a_save_and_leaves_the_fingerprint(
 
 
 def _assumed(tid, **over):
-    """`_apply_modelling_assumptions` on the template, with `over` on its config."""
+    """The template's solve set up (its transforms applied), and the basis it holds for the stamp."""
     from routers.projects import _solver_config_from_dict
-    from services.solver.assumptions import _apply_modelling_assumptions
+    from services.solver.assumptions import (
+        SOLVE_BASIS_CAPTURED,
+        _apply_modelling_assumptions,
+    )
 
     n = T.BUILDERS[tid]()
     n.snapshots.name = "snapshot"
     cfg = dataclasses.replace(_solver_config_from_dict(T.solver_config(tid)), **over)
     original = n.investment_period_weightings["objective"].copy()
-    restore, _ = _apply_modelling_assumptions(n, cfg, lambda _m: None)
-    return n, cfg, original, restore
+    restore, captured = _apply_modelling_assumptions(n, cfg, lambda _m: None)
+    return n, cfg, original, restore, captured[SOLVE_BASIS_CAPTURED]
 
 
-def test_the_strategy_is_stamped_with_the_discount_at_solve_start():
-    from services.solver.assumptions import SOLVE_DISCOUNT_META, SOLVE_STRATEGY_META
+def test_the_basis_is_held_with_the_discount_and_stamped_only_on_commit():
+    from services.solver.assumptions import (
+        SOLVE_BASIS_CAPTURED,
+        SOLVE_DISCOUNT_META,
+        SOLVE_STRATEGY_META,
+        _apply_modelling_assumptions,
+        commit_solve_basis,
+    )
 
-    n, cfg, original, restore = _assumed("eh_h2_hub_staged", solve_strategy="rolling")
-    assert n.meta[SOLVE_STRATEGY_META] == "rolling"
-    applied = {int(p): f for p, f in n.meta[SOLVE_DISCOUNT_META]["factors"].items()}
+    # Rolling on a multi-period template runs the full horizon (GK B F2): the stamp says so.
+    n, cfg, original, restore, basis = _assumed(
+        "eh_h2_hub_staged", solve_strategy="rolling"
+    )
+    assert basis["strategy"] == "full"
+    applied = {int(p): f for p, f in basis["discount"]["factors"].items()}
     assert applied == {
         int(p): float(v) for p, v in n.investment_period_weightings["objective"].items()
     }
+    assert SOLVE_DISCOUNT_META not in n.meta and SOLVE_STRATEGY_META not in n.meta
+    commit_solve_basis(n, {SOLVE_BASIS_CAPTURED: basis})
+    assert n.meta[SOLVE_STRATEGY_META] == "full"
+    assert n.meta[SOLVE_DISCOUNT_META] == basis["discount"]
     restore()
     assert n.investment_period_weightings["objective"].equals(original)
-    # A later solve with the discount off clears the stamp: never the previous solve's.
-    from services.solver.assumptions import _apply_modelling_assumptions
-
-    _apply_modelling_assumptions(
+    # A later solve with the discount off holds a null discount: never the previous solve's.
+    _r, captured = _apply_modelling_assumptions(
         n, dataclasses.replace(cfg, auto_discount_periods=False), lambda _m: None
     )
+    commit_solve_basis(n, captured)
     assert n.meta[SOLVE_DISCOUNT_META] is None
 
 
-def test_a_failure_part_way_restores_the_weights_and_stamps_none(monkeypatch):
+def test_a_failure_part_way_restores_the_weights_and_holds_none(monkeypatch):
     from services.solver import assumptions
-    from services.solver.assumptions import SOLVE_DISCOUNT_META
 
     real = assumptions.auto_discount_factors
 
@@ -291,10 +328,71 @@ def test_a_failure_part_way_restores_the_weights_and_stamps_none(monkeypatch):
         return {**f, "factors": _Partial(f["factors"])}
 
     monkeypatch.setattr(assumptions, "auto_discount_factors", short)
-    n, _cfg, original, restore = _assumed("eh_h2_hub_staged")
-    assert n.meta[SOLVE_DISCOUNT_META] is None
+    n, _cfg, original, restore, basis = _assumed("eh_h2_hub_staged")
+    assert basis["discount"] is None
     restore()
     assert n.investment_period_weightings["objective"].equals(original)
+
+
+class _Cfg:
+    def __init__(self, strategy, multi, sclopf=False):
+        self.solve_strategy, self.multi_investment_periods, self.sclopf = (
+            strategy,
+            multi,
+            sclopf,
+        )
+
+
+@pytest.mark.parametrize(
+    "strategy, multi, sclopf, ran",
+    [
+        ("myopic", True, False, "myopic"),
+        ("myopic", True, True, "myopic"),  # myopic subsumes SCLOPF
+        ("myopic", False, False, "full"),  # GK B F1: myopic without periods runs full
+        ("rolling", False, False, "rolling"),
+        ("rolling", True, False, "full"),  # GK B F1: rolling with periods falls back
+        ("rolling", False, True, "full"),  # GK B F1: rolling with SCLOPF runs full
+        ("full", True, False, "full"),
+    ],
+)
+def test_the_stamp_records_the_strategy_dispatched_not_the_one_asked(
+    strategy, multi, sclopf, ran
+):
+    from services.solver.assumptions import dispatched_strategy
+
+    assert dispatched_strategy(_Cfg(strategy, multi), sclopf=sclopf) == ran
+
+
+@pytest.mark.live_solve
+def test_a_failed_solve_leaves_the_previous_solves_stamp_with_its_results(
+    monkeypatch, reset_backend
+):
+    """GK B F4: a solve that fails after its set-up leaves the last solve's results, so the stamp
+    the status and the decomposition read must still be that solve's."""
+    from services import solver_service as ss
+    from services.dispatch_status import dispatch_status
+    from services.pypsa_service import PyPSAService
+    from services.solver.assumptions import solve_discount, solve_strategy
+
+    n, cfg = _solved("eh_h2_hub_staged")
+    before = (solve_discount(n), solve_strategy(n), n.objective)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("solver died")
+
+    # Raised after `_apply_modelling_assumptions` has priced the new rate.
+    monkeypatch.setattr(ss._operational, "fallback_refusal", boom)
+    status, _ = ss.run_simulation(
+        dataclasses.replace(cfg, discount_rate=0.15),
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **kw: None,
+    )
+    assert status == "error"
+    assert dispatch_status(n) == "fresh"
+    assert (solve_discount(n), solve_strategy(n), n.objective) == before
 
 
 @pytest.mark.parametrize(

@@ -126,6 +126,10 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
 
     stamp = solve_discount(n)
     disc = stamp if isinstance(stamp, dict) else None
+    if disc is not None and any(p is not None and int(p) not in disc["factors"] for p in fixed):
+        # A period the stamp does not price (the network's periods changed since the solve):
+        # the weights the LP used are not known, so the discount reads unknown (GK B F5).
+        stamp, disc = UNKNOWN, None
     lp_basis = 0.0
     nonext_reported = 0.0
     for p, f in fixed.items():
