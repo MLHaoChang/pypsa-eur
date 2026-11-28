@@ -69,7 +69,7 @@ describe('AppHeader — a run requested from elsewhere', () => {
     expect(enqueue).not.toHaveBeenCalled()
   })
 
-  it('says the queue’s location refusal in words, with the way to fix it', async () => {
+  it('says the queue’s location refusal in the shared words', async () => {
     const spy = vi.spyOn(toast, 'error').mockImplementation(() => '')
     enqueue.mockRejectedValueOnce({ response: { data: { detail: {
       code: 'site_location_missing', error_kind: 'site_location_missing',
@@ -80,7 +80,7 @@ describe('AppHeader — a run requested from elsewhere', () => {
     await vi.waitFor(() => expect(spy).toHaveBeenCalled())
     const msg = String(spy.mock.calls[0][0])
     expect(msg).toContain('The site has no location')
-    expect(msg).toContain('Latitude/Longitude')
+    expect(msg).toBe('The site has no location: set its latitude and longitude before running.')
     spy.mockRestore()
   })
 })

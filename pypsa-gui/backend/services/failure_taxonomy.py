@@ -33,8 +33,7 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         "site_location_missing",
         "The site has no location",
         "Nothing was solved: the site has no location. Set its latitude and "
-        "longitude in the site location drawer (Guided: Open here; Expert: the "
-        "Latitude/Longitude fields), then run again.",
+        "longitude, then run again.",
     ),
     (
         ("operational_window_failed",),

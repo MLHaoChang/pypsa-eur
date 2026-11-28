@@ -936,13 +936,11 @@ export default function AppHeader() {
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       // The queue's typed refusal (422 site_location_missing) is a dict, not a
-      // string: say its message and where to fix it, never "unknown error".
+      // string: say its message (the shared site_location.MESSAGE), never "unknown error".
       const typed = detail && typeof detail === 'object'
         ? (detail as { code?: string; message?: string }) : null
       const text = typeof detail === 'string' ? detail
-        : typed?.code === 'site_location_missing' && typed.message
-          ? `${typed.message} Set it in the site location drawer (Latitude/Longitude).`
-          : typed?.message ?? null
+        : typed?.message ?? null
       appLog('ERROR', `${runLabel} failed to queue: ${text ?? 'unknown error'}`)
       toast.error(text ?? 'Failed to queue the solve.', { duration: text ? 6000 : undefined })
     } finally {
