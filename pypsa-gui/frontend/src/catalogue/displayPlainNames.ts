@@ -26,13 +26,21 @@ export type ModelNameMap = Record<string, Record<string, string>>
 
 /** Names the Properties panel still labels differently (`FieldSpec.label`), so
  *  chat keeps them raw until expert-catalogue slice 03 moves the panel to the
- *  catalogue. Mirrored in `services/chat_plain_names.py`, which has the test
- *  that fails once a label matches. */
+ *  catalogue. Mirrored in `services/chat_plain_names.py`, whose test derives the
+ *  set from the labels; both are pinned to `panel_names_differ` in the case table. */
 export const PANEL_NAMES_DIFFER: readonly string[] = [
-  'marginal_cost',
   'capital_cost',
+  'e_nom_extendable',
+  'e_nom_max',
+  'e_nom_min',
+  'marginal_cost',
+  'p_nom_extendable',
   'p_nom_max',
+  'p_nom_min',
   's_nom',
+  's_nom_extendable',
+  's_nom_max',
+  's_nom_min',
 ]
 
 interface NameIndex {

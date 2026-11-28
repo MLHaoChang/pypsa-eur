@@ -151,9 +151,27 @@ COLUMNS = {
 # The Properties panel still shows `FieldSpec.label` for these, which is not the
 # catalogue's word (Line s_nom: "Capacity" there, "Rating" here), so chat keeps
 # them raw until expert-catalogue slice 03 moves the panel to the catalogue.
-# `tests/test_display_plain_names.py` fails once a name here no longer differs.
-# Mirrored in `frontend/src/catalogue/displayPlainNames.ts`.
-PANEL_NAMES_DIFFER = frozenset({"marginal_cost", "capital_cost", "p_nom_max", "s_nom"})
+# Every snake_case name whose label differs on some class, derived and pinned by
+# `tests/test_display_plain_names.py` (it fails when this drifts, or once a
+# label matches). Chat cannot tell the class, so a name is raw on every class.
+# Mirrored in `frontend/src/catalogue/displayPlainNames.ts`; both are pinned to
+# `panel_names_differ` in the case table.
+PANEL_NAMES_DIFFER = frozenset(
+    {
+        "capital_cost",
+        "e_nom_extendable",
+        "e_nom_max",
+        "e_nom_min",
+        "marginal_cost",
+        "p_nom_extendable",
+        "p_nom_max",
+        "p_nom_min",
+        "s_nom",
+        "s_nom_extendable",
+        "s_nom_max",
+        "s_nom_min",
+    }
+)
 
 _EDGE = r"(?<![A-Za-z0-9_])"
 _END = r"(?![A-Za-z0-9_])"

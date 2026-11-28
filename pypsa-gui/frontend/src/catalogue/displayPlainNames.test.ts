@@ -52,6 +52,10 @@ describe('display replacement: the catalogue is the one word source', () => {
     expect(replaced).toBeGreaterThan(80)
   })
 
+  it('keeps raw the names the panel labels differently, as the backend test derives them', () => {
+    expect([...PANEL_NAMES_DIFFER].sort()).toEqual([...table.panel_names_differ].sort())
+  })
+
   it('reads the words the panel shows (spot checks against the catalogue file)', () => {
     expect(displayWord('e_nom')).toBe(plainNameOf('Store', 'e_nom'))
     expect(displayWord('s_nom')).toBeNull() // the panel labels it differently until slice 03

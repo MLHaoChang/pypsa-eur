@@ -1,5 +1,19 @@
 {
  "about": "Display replacement in chat (expert-catalogue spec §7.3), shared by frontend/src/catalogue/displayPlainNames.test.ts (displayPlainNames: the chat text and the browser speech path) and tests/test_display_plain_names.py (services/chat_plain_names.py display_plain_names: the live-voice TTS path). user is the message the text answers. Plain names are the Parameter catalogue's (modelNames.generated.json on the frontend, asset_schema lookup on the server).",
+ "panel_names_differ": [
+  "capital_cost",
+  "e_nom_extendable",
+  "e_nom_max",
+  "e_nom_min",
+  "marginal_cost",
+  "p_nom_extendable",
+  "p_nom_max",
+  "p_nom_min",
+  "s_nom",
+  "s_nom_extendable",
+  "s_nom_max",
+  "s_nom_min"
+ ],
  "cases": [
   {
    "why": "a backticked catalogue name is shown as its plain name",
@@ -119,9 +133,9 @@
      "want": "~~~ `e_nom`\n~~~"
   },
   {
-   "why": "the four names the Properties panel still labels differently stay raw until expert-catalogue slice 03 (UX 34)",
-   "text": "Set `marginal_cost`, `capital_cost`, `p_nom_max` and the line's `s_nom`; `e_nom` is replaced.",
-   "want": "Set `marginal_cost`, `capital_cost`, `p_nom_max` and the line's `s_nom`; Energy capacity is replaced."
+   "why": "the names the Properties panel still labels differently stay raw until expert-catalogue slice 03 (UX 34)",
+   "text": "Set `marginal_cost`, `capital_cost`, `p_nom_min`, `s_nom_max`, `e_nom_extendable` and the line's `s_nom`; `e_nom` is replaced.",
+   "want": "Set `marginal_cost`, `capital_cost`, `p_nom_min`, `s_nom_max`, `e_nom_extendable` and the line's `s_nom`; Energy capacity is replaced."
   }
  ]
 }

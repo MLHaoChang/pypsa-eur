@@ -48,21 +48,29 @@ _PANEL_CLASSES = {
     "Link": fields.LINK,
     "Line": fields.LINE,
     "Transformer": fields.TRANSFORMER,
+    "Load": fields.LOAD,
+    "Bus": fields.BUS,
+    "Carrier": fields.CARRIER,
+    "GlobalConstraint": fields.GLOBAL_CONSTRAINT,
+    "ShuntImpedance": fields.SHUNT_IMPEDANCE,
 }
 
 
-@pytest.mark.parametrize("key", sorted(P.PANEL_NAMES_DIFFER))
-def test_a_name_chat_keeps_raw_still_differs_from_the_panel_label(key):
-    """Fails once the Properties panel shows the catalogue's word for `key` on every
-    class (expert-catalogue slice 03): then drop it from `PANEL_NAMES_DIFFER`, here
-    and in `displayPlainNames.ts`."""
-    differs = [
-        cls
+def test_chat_keeps_raw_exactly_the_names_the_panel_labels_differently():
+    """The set is derived: every snake_case name whose Properties-panel label
+    (`FieldSpec.label`) is not the catalogue word on some class. It fails when a new
+    name drifts, or once the panel shows the catalogue's word (expert-catalogue
+    slice 03): then drop the name from `PANEL_NAMES_DIFFER` here and in
+    `displayPlainNames.ts`, and from `panel_names_differ` in the case table."""
+    derived = {
+        spec.key
         for cls, specs in _PANEL_CLASSES.items()
         for spec in specs
-        if spec.key == key and lookup.plain_name(cls, key) not in (None, spec.label)
-    ]
-    assert differs, f"{key}: the panel label equals the catalogue word on every class"
+        if "_" in spec.key
+        and lookup.plain_name(cls, spec.key) not in (None, spec.label)
+    }
+    assert P.PANEL_NAMES_DIFFER == derived
+    assert set(TABLE["panel_names_differ"]) == derived
 
 
 SPOKEN = "Set `e_nom` to 200 MWh; `p_nom` stays."
