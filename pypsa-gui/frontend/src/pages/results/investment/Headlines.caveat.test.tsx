@@ -7,7 +7,7 @@ import { Headlines } from './InvestmentCaseView'
 
 /** te-24 (LCOE-CAVEAT-1): Investment's "LCOE (real)" row carries the headline card's caveat in
  *  the headlines grid, under that row, when the card holds the same figure (UX rule 46). */
-const CAVEAT = 'Above € 300/MWh, high for a hospital: the backup kept for the critical load is costed but rarely runs.'
+const CAVEAT = 'Above € 300/MWh, high for a hospital: the figure includes the cost of the backup kept for the critical load.'
 const card = (value: number): HeadlineCard => ({
   id: 'lcoe', value, unit: 'EUR/MWh', state: 'ready', reason: null, formula_id: null,
   detail: null, delta: null, trend: null, caveat: CAVEAT,

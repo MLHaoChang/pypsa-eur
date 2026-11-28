@@ -72,7 +72,9 @@ def lcoe_caveat(value, unit, *, template: dict | None, n) -> str | None:
     site = _SITE_WORD.get(str((template or {}).get("site_type")), "a site like this")
     if critical_share(template) is not None and backup_mw(n) > 0:
         return (
-            f"{_bound_words()}, high for {site}: the backup kept for the "
-            "critical load is costed but rarely runs."
+            # Only what is checked: the gensets are in the design, so their cost is in
+            # the figure. How often they run is not checked, so it is not claimed (GK B3).
+            f"{_bound_words()}, high for {site}: the figure includes the cost of "
+            "the backup kept for the critical load."
         )
     return f"{_bound_words()}, high for {site}."

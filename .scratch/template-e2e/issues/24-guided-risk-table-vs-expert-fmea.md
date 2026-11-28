@@ -33,5 +33,5 @@ Checked by code reading only; the app was not re-run. Acceptance as above: Guide
 - 2026-11-28: the LCOE caveat lands in #2117 (owner decision LCOE-CAVEAT-1: EUR 300/MWh). With it, all three acceptance lines are met, and Status is done once #2117 merges.
 - Follow-ups (UX 33 on #2117, not blocking):
   - Money notation: the LCOE figure reads "413.2 €/MWh" while its caveat reads "€ 300/MWh", two notations on one card.
-  - The caveat's "rarely runs" is not checked against dispatch.
+  - The cause sentence no longer claims the backup "rarely runs", because that is not checked against dispatch (GK B3 on #2117). A dispatch-based "rarely runs" (weighted genset capacity factor below a named threshold) is a possible follow-up, once someone sets the threshold.
   - Investment's "Project NPV … -2,400,000.00" row (on master already) is not in money()/signFirstEuro style (ruling (ad)). AA 36 (#2090) may already cover it.

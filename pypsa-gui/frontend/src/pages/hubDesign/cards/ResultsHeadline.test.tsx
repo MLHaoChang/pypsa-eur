@@ -376,7 +376,7 @@ describe('Results headline: the CO₂ limit', () => {
 })
 
 describe('LCOE caveat (te-24, LCOE-CAVEAT-1)', () => {
-  const CAVEAT = 'Above €\u00a0300/MWh, high for a hospital: the backup kept for the critical load is costed but rarely runs.'
+  const CAVEAT = 'Above €\u00a0300/MWh, high for a hospital: the figure includes the cost of the backup kept for the critical load.'
   it('shows the server\'s caveat, muted, under a figure above the bound', async () => {
     vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(withLcoe({ ...LCOE_READY, value: 413, caveat: CAVEAT }))
     mount()

@@ -412,7 +412,7 @@ describe('HeadlineStrip trend over the investment periods', () => {
 })
 
 describe('LCOE caveat (te-24, LCOE-CAVEAT-1)', () => {
-  const CAVEAT = 'Above €\u00a0300/MWh, high for a hospital: the backup kept for the critical load is costed but rarely runs.'
+  const CAVEAT = 'Above €\u00a0300/MWh, high for a hospital: the figure includes the cost of the backup kept for the critical load.'
   it('the Expert strip shows the same caveat as Guided, from the same card', async () => {
     api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [
       card('lcoe', { value: 413, unit: 'EUR/MWh', caveat: CAVEAT })] })

@@ -47,7 +47,7 @@ r.getEhStudy = async () => ({ status: 'done', archetype: 'weak_flexible', report
 r.getEhReview = async () => review()
 r.getEhReferenceDesign = async () => REPORT
 r.getEhTemplate = async () => SITE_TEMPLATE
-const CAUSE = 'Above \u20ac\u00a0300/MWh, high for a hospital: the backup kept for the critical load is costed but rarely runs.'
+const CAUSE = 'Above \u20ac\u00a0300/MWh, high for a hospital: the figure includes the cost of the backup kept for the critical load.'
 const NEUTRAL = 'Above \u20ac\u00a0300/MWh, high for a hospital.'
 const lcoe = { id: 'lcoe', value: 413.2, unit: 'EUR/MWh', state: 'ready', reason: null, formula_id: 'investment-lcoe-real/1',
   detail: null, delta: null, trend: null, money_year: 2025, basis: 'investment case \u00b7 real basis, 2025 EUR',

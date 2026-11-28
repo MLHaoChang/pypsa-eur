@@ -14,7 +14,7 @@ from services.results.lcoe_caveat import (
 
 NBSP = " "
 HOSPITAL = {"id": "eh_site", "site_type": "hospital", "params": {"critical_share": 0.5}}
-CAUSE = "the backup kept for the critical load is costed but rarely runs"
+CAUSE = "the figure includes the cost of the backup kept for the critical load"
 
 
 class _Net:
