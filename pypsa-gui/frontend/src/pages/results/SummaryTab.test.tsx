@@ -6,6 +6,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { ResultsFilterProvider } from './filterContext'
+import { useResultsOutOfDateFlag } from '../../store/resultsOutOfDate'
+import { OUT_OF_DATE_TEXT } from '../../components/ResultsOutOfDate'
+import { nk } from '../../utils/queryKeys'
 import type { FlowScopeRegistry } from '../../api/flow'
 
 const flowApi = vi.hoisted(() => ({ getFlowScope: vi.fn(), getProjectFlow: vi.fn() }))
@@ -17,6 +20,15 @@ const api = vi.hoisted(() => ({
   getAdequacy: vi.fn(), getStatistics: vi.fn(), getStatus: vi.fn(), getHeadlineKpis: vi.fn(),
   getProcessView: vi.fn(),
   getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhReferenceDesign: vi.fn(),
+  getObjectiveDecomposition: vi.fn(), getGenerators: vi.fn(), getLinks: vi.fn(),
+}))
+vi.mock('../../api/network', async (orig) => {
+  const actual = await orig<typeof import('../../api/network')>()
+  return { ...actual, networkApi: { ...actual.networkApi, getGenerators: api.getGenerators, getLinks: api.getLinks } }
+})
+vi.mock('../../api/results', async (orig) => ({
+  ...(await orig<typeof import('../../api/results')>()),
+  getObjectiveDecomposition: api.getObjectiveDecomposition,
 }))
 vi.mock('../../api/simulation', async (orig) => {
   const actual = await orig<typeof import('../../api/simulation')>()
@@ -50,8 +62,10 @@ function renderTab(onOpenTab = vi.fn(), period: number | null = null) {
       </ResultsFilterProvider>
     </QueryClientProvider>,
   )
+  renderedClient = qc
   return onOpenTab
 }
+let renderedClient: QueryClient
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
@@ -68,6 +82,9 @@ beforeEach(() => {
   api.getEhStudy.mockResolvedValue(null)
   api.getEhReview.mockResolvedValue(null)
   api.getEhReferenceDesign.mockResolvedValue(null)
+  api.getObjectiveDecomposition.mockResolvedValue(null)
+  api.getGenerators.mockResolvedValue([])
+  api.getLinks.mockResolvedValue([])
   flowApi.getProjectFlow.mockRejectedValue(new Error('no flow'))
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); useUIStore.setState({ currentProject: null }) })
@@ -332,12 +349,12 @@ describe('SummaryTab source run (control-strategy 06)', () => {
     api.getEhReview.mockResolvedValue({ status: 'ok', stale: false,
       summary: { verdict: 'pass', mc_lole_h_per_year: 0, target_lole_h: 3 } })
     const run = vi.fn()
-    useUIStore.setState({ requestRunSolve: run })
+    useUIStore.setState({ requestDispatchSolve: run })
     renderTab()
     const verdict = await screen.findByTestId('summary-study-verdict')
     expect(verdict.textContent).toMatch(/^Certified/)
     expect(screen.getByTestId('summary-source-from').textContent).toMatch(/^From the reliability study, 2026-11-1[78] \d\d:\d\d$/)
-    expect(screen.getByTestId('summary-source-missing').textContent).toBe('The dispatch solve has not run·Run the solve ›')
+    expect(screen.getByTestId('summary-source-missing').textContent).toBe('The dispatch solve has not run·Run the solve')
     expect(screen.queryByTestId('summary-empty')).toBeNull()
     fireEvent.click(screen.getByTestId('summary-source-action'))
     expect(run).toHaveBeenCalledTimes(1)
@@ -354,6 +371,31 @@ describe('SummaryTab source run (control-strategy 06)', () => {
     expect(screen.queryByTestId('summary-source-stale')).toBeNull()
   })
 
+  // Issue 18 (UX 34 item 2 on #2140): after an edit every results route answers "out of date" (no body), and
+  // when a solve ends they come back one by one. A part still empty while the results are out of date says
+  // so, never "No … for this solve".
+  it('an out-of-date result with only some parts back says out of date, never "No … for this solve"', async () => {
+    api.getCostBreakdown.mockResolvedValue(null)
+    api.getStatistics.mockResolvedValue(null)
+    api.getStatus.mockResolvedValue({ status: 'completed', condition: 'optimal', objective: 1.2e7, solve_time: 3.4,
+      dispatch: 'stale', solved_at: null })
+    flow({ optimisation: 'stale', study: null, loadflow: 'not_run' })
+    useResultsOutOfDateFlag.setState({ project: 'Demo' })
+    renderTab()
+    const cost = await screen.findByTestId('summary-cost')
+    await waitFor(() => expect(cost.textContent).toContain(OUT_OF_DATE_TEXT))
+    expect(screen.getByTestId('summary-capacity').textContent).toContain(OUT_OF_DATE_TEXT)
+    expect(screen.queryByText(/No cost breakdown for this solve|No capacities for this solve/)).toBeNull()
+    useResultsOutOfDateFlag.setState({ project: null })
+  })
+
+  it('a solve\'s end refreshes the capacities with the other results (one results root)', async () => {
+    renderTab()
+    await waitFor(() => expect(api.getStatistics).toHaveBeenCalledTimes(1))
+    await renderedClient.invalidateQueries({ queryKey: nk('Demo', 'results') })
+    await waitFor(() => expect(api.getStatistics).toHaveBeenCalledTimes(2))
+  })
+
   it('a solve older than the inputs is marked out of date (GK B3 C2)', async () => {
     api.getStatus.mockResolvedValue({ status: 'completed', condition: 'optimal', objective: 1.2e7, solve_time: 3.4,
       dispatch: 'fresh', solved_at: null })
@@ -363,5 +405,102 @@ describe('SummaryTab source run (control-strategy 06)', () => {
     expect(screen.getByTestId('summary-source-from').textContent).toBe('From the dispatch solve')
     // A project with no study kind is not offered one.
     expect(screen.queryByTestId('summary-source-missing')).toBeNull()
+  })
+})
+
+// Template-e2e 18: the solve message and the status bar show the LP objective; the strip and the Summary the
+// total system cost. Where they differ, the Summary says by how much and why.
+describe('the LP objective beside the total system cost (template-e2e 18)', () => {
+  const STRIP = { kind: 'energy_hub', cards: [
+    { id: 'system_cost', value: 194.87e6, unit: 'currency', state: 'ready', reason: null, formula_id: null, detail: null,
+      trend: { basis: '', points: [{ period: 2027, value: 4e6 }, { period: 2030, value: 33e6 }, { period: 2035, value: 157.87e6 }] } },
+  ] }
+  const DEC = {
+    n_objective: 120.29e6, n_objective_constant: 0, lp_total: 120.29e6, cost_breakdown_total: 194.87e6,
+    gap_eur: -74.58e6, lp_total_scope: 'horizon', nonextendable_fixed_cost_eur: 6.61e6,
+    period_weighting_adjustment_eur: -67.97e6, residual_gap_eur: 0, discount: { ref_year: 2027, real_rate: 0.049 },
+  }
+
+  it('says the objective is discounted and leaves out the existing assets, with each amount', async () => {
+    api.getHeadlineKpis.mockResolvedValue(STRIP)
+    api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 120.29e6,
+      solve_time: 4.2, objective_basis: 'lp_objective', objective_discounted_to: 2027 })
+    api.getObjectiveDecomposition.mockResolvedValue(DEC)
+    renderTab()
+    const line = await screen.findByTestId('summary-objective')
+    expect(line.textContent).toBe('LP objective €120.29 M'
+      + ' · from the total system cost €194.87 M, discounting to 2027 at 4.9 % real takes €67.97 M off'
+      + " · existing assets' fixed cost (€6.61 M) is not in it")
+    expect(screen.getByTestId('headline-system_cost').textContent).toContain('summed over the periods, not discounted')
+  })
+
+  it('gives every part of the line in the objective\'s scale, so they add up on sight (UX 34 on #2140)', async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [{ ...STRIP.cards[0], value: 8.6312e9 }] })
+    api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 419.52e6,
+      solve_time: 4.2, objective_basis: 'lp_objective', objective_discounted_to: 2027 })
+    api.getObjectiveDecomposition.mockResolvedValue({ ...DEC, n_objective: 419.52e6, lp_total: 419.52e6,
+      cost_breakdown_total: 8631.2e6, gap_eur: -8211.68e6, nonextendable_fixed_cost_eur: 0,
+      period_weighting_adjustment_eur: -8211.68e6, discount: { ref_year: 2027, real_rate: 0.07 } })
+    renderTab()
+    const line = await screen.findByTestId('summary-objective')
+    expect(line.textContent).toBe('LP objective €419.52 M'
+      + ' · from the total system cost €8,631.20 M, discounting to 2027 at 7.0 % real takes €8,211.68 M off')
+    expect(line.getAttribute('title')).not.toMatch(/n\.statistics|n\.objective/)
+  })
+
+  it('keeps the objective when the breakdown cannot be read, and never says not run', async () => {
+    api.getHeadlineKpis.mockResolvedValue(STRIP)
+    api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 120.29e6,
+      solve_time: 4.2, objective_basis: 'lp_objective', objective_discounted_to: 2027 })
+    api.getObjectiveDecomposition.mockRejectedValue(new Error('500'))
+    renderTab()
+    const line = await screen.findByTestId('summary-objective')
+    expect(line.textContent).toBe('LP objective €120.29 M · discounted to 2027'
+      + ' · The cost breakdown could not be read. Try again in a moment.')
+    expect(screen.queryByText(/Not run yet|No results yet/)).toBeNull()
+  })
+
+  it("names the existing assets' fixed cost Guided's yearly cost leaves out (single period)", async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [
+      { id: 'system_cost', value: 9.022e6, unit: 'currency', state: 'ready', reason: null, formula_id: null, detail: null } ] })
+    api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 9.022e6,
+      solve_time: 1, objective_basis: 'lp_objective', objective_discounted_to: null })
+    api.getObjectiveDecomposition.mockResolvedValue({ ...DEC, n_objective: 7.609e6, n_objective_constant: 1.413e6, existing_asset_constant: 1.413e6,
+      lp_total: 9.022e6, cost_breakdown_total: 9.022e6, nonextendable_fixed_cost_eur: 0,
+      period_weighting_adjustment_eur: 0, discount: null })
+    renderTab()
+    const line = await screen.findByTestId('summary-objective')
+    expect(line.textContent).toBe("LP objective €9.02 M · not discounted"
+      + " · includes existing assets' fixed cost (€1.41 M), which Guided's yearly cost leaves out")
+  })
+})
+
+describe('Key capacities leaves out the grid supply (template-e2e 18)', () => {
+  const GRID_STATS = [
+    { level_0: 'Generator', level_1: 'grid', 'Optimal Capacity': 500, 'Installed Capacity': 500 },
+    { level_0: 'Generator', level_1: 'solar', 'Optimal Capacity': 12, 'Installed Capacity': 12 },
+  ]
+  const flowWith = (connection: object) =>
+    flowApi.getProjectFlow.mockResolvedValue({ sections: [{ section: 'connection', ...connection }] } as never)
+  it("names the server's connection limit, not the supply's placeholder 500 MW", async () => {
+    api.getStatistics.mockResolvedValue(GRID_STATS)
+    flowWith({ state: 'complete', connection_limit: { mw: 40, refusal: null, links: ['grid_import'] } })
+    renderTab()
+    await vi.waitFor(() => expect(screen.getByTestId('summary-cap-grid-note').textContent)
+      .toBe("Grid supply: up to 40.0 MW, through the site's connection."))
+    expect(screen.queryByTestId('summary-cap-Generator-grid')).toBeNull()
+  })
+  it('says an off-grid site gets none, whatever its tie is rated', async () => {
+    api.getStatistics.mockResolvedValue(GRID_STATS)
+    flowWith({ state: 'not_needed', connection_limit: { mw: 20, refusal: null, links: ['subsea_tie'] } })
+    renderTab()
+    await vi.waitFor(() => expect(screen.getByTestId('summary-cap-grid-note').textContent)
+      .toBe('Grid supply: none, the site runs off the grid.'))
+  })
+  it('shows no grid note until the flow is read', async () => {
+    api.getStatistics.mockResolvedValue(GRID_STATS)
+    renderTab()
+    await screen.findByText('solar', { exact: false })
+    expect(screen.queryByTestId('summary-cap-grid-note')).toBeNull()
   })
 })

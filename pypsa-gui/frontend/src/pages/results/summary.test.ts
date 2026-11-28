@@ -3,7 +3,7 @@
 // selected period) and the unnamed PyPSA 1.1 statistics index columns.
 import { describe, expect, it } from 'vitest'
 import type { CostBreakdown } from '../../api/simulation'
-import { capacityRows, costView, emissionsView, reserveMarginVerdict, vollOf, type EmissionsPayload } from './summary'
+import { capacityRows, costView, hasGridSupply, emissionsView, reserveMarginVerdict, vollOf, type EmissionsPayload } from './summary'
 
 const COST = {
   capex: 900, capex_expansion: 300, opex: 100, total: 1000,
@@ -66,6 +66,18 @@ describe('capacityRows', () => {
     expect(rows.map(r => [r.carrier, r.unit, r.capacity, r.newBuild])).toEqual([
       ['solar', 'MW', 166.7, 156.7], ['gas', 'MW', 100, 0], ['battery', 'MW', 5, 0], ['h2', 'MWh', 50, 30],
     ])
+  })
+  // Template-e2e 18: the grid supply's p_nom is a placeholder beyond the connection, not a site capacity.
+  it('leaves out the grid supply (the off-grid microgrid\'s 100 MW, the data centre\'s 500 MW)', () => {
+    const stats = [
+      { level_0: 'Generator', level_1: 'grid', 'Optimal Capacity': 500, 'Installed Capacity': 500 },
+      { level_0: 'Generator', level_1: 'solar', 'Optimal Capacity': 12, 'Installed Capacity': 12 },
+      { level_0: 'Link', level_1: 'grid', 'Optimal Capacity': 40, 'Installed Capacity': 40 },
+    ]
+    expect(capacityRows(stats, null).map(r => r.carrier)).toEqual(['solar'])
+    expect(hasGridSupply(stats)).toBe(true)
+    expect(hasGridSupply(stats.slice(1))).toBe(false)
+    expect(hasGridSupply(null)).toBe(false)
   })
   it('new build is never negative: an extendable asset optimised below its starting size built nothing', () => {
     const [r] = capacityRows([{ level_0: 'Generator', level_1: 'wind', 'Optimal Capacity': 4, 'Installed Capacity': 10 }], null)

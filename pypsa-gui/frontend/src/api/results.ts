@@ -47,3 +47,31 @@ export interface EhStudyWhy {
 export const getEhStudyWhy = (figure: EhStudyWhyFigure): Promise<EhStudyWhy> =>
   client.get(`/results/eh_study/why/${figure}`, { skipErrorToast: true })
     .then(r => r.data as EhStudyWhy)
+
+/** `GET /results/objective_decomposition`: why the LP objective and the reported total system cost differ
+ *  (template-e2e 18). `lp_total = cost_breakdown_total − nonextendable_fixed_cost_eur +
+ *  period_weighting_adjustment_eur − reserve_revenue_eur + residual_gap_eur`; the bridge fields are null under
+ *  myopic foresight and rolling horizon (no single LP total), and every field may be null. */
+export interface ObjectiveDecomposition {
+  n_objective: number | null
+  n_objective_constant: number | null
+  /** The part of the constant that is existing assets' fixed cost; null when it cannot be told (a
+   *  curtailment-cost run whose baseline did not survive a reload). */
+  existing_asset_constant?: number | null
+  lp_total: number | null
+  cost_breakdown_total: number | null
+  gap_eur: number | null
+  lp_total_scope?: 'horizon' | 'last_period' | 'last_window'
+  nonextendable_fixed_cost_eur: number | null
+  period_weighting_adjustment_eur: number | null
+  reserve_revenue_eur?: number
+  residual_gap_eur: number | null
+  /** The auto period discount the solve applied (its stamp); null when it applied none, "unknown" for a
+   *  result solved before the stamp. */
+  discount: { ref_year: number; real_rate: number } | null | 'unknown'
+}
+
+/** Null when nothing is solved (204). */
+export const getObjectiveDecomposition = (): Promise<ObjectiveDecomposition | null> =>
+  client.get<ObjectiveDecomposition>('/results/objective_decomposition', { skipErrorToast: true })
+    .then(r => (r.status === 204 ? null : r.data))

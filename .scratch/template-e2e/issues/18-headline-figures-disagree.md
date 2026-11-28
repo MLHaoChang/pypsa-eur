@@ -3,7 +3,7 @@
 
 # 18 — Cost and capacity headline figures disagree or are missing
 
-Status: ready-for-agent
+Status: done (#2135 backend, #2140 UI; follow-ups below stay open)
 Impact: high (raised 2026-11-20, UX 3 review of #1777)
 Templates: DC staged, H2 staged, microgrid (both), ammonia, DC
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -31,3 +31,14 @@ Checked by code reading only; the app was not re-run. Still true: `HeadlineStrip
 - Seen again 2026-11-20 (template walk, master 1f6905e3): H2: Guided 'Yearly cost' EUR 7.61 M vs Expert Run LOPF Summary 'Total system cost' EUR 9.02 M (status bar 'Obj: € 9 m'), no basis stated on either. DC (34.7 M) and microgrid (3.47 M) agree.
 
 - Seen again 2026-11-21 (template walk, master 6b421b06): Ammonia (`eh_ammonia_staged`): Guided "Cost over the plan, 2027–2035 (discounted, before any shortfall costs)" EUR 116 M; Expert Results Summary "Total system cost" EUR 188 M (capital 92.9 M, operating 95.5 M); status bar "Obj: € 120 m". The Guided label names a discounted basis, the Expert card says only "in this solve". Sizes agree (electrolyser_new_2030 18.4 MW, electrolyser_new_2035 10.5 MW, h2_storage 22.6 MWh, nh3_tank 446.9 MWh). IPP agrees (Guided and Expert -4.55 M). Concentrator: no Guided figure (run not finished).
+
+## Notes (2026-11-28, te 18 build)
+
+- Run buttons (coordinator answer A): in Expert, when a project has a study, the header's Run is the study (TE2E-17-RUN-1). The Summary's "Run the solve ›" and the out-of-date banner's "Run the solve" run the dispatch solve themselves (`requestDispatchSolve`). The solve toast names its figure the way the status bar does ("LP objective €X (discounted to 2027)", "System cost €X").
+- Follow-up B (not in this issue): when there is no LOPF solve, the results routes could read the study's own solve instead of showing "No cost breakdown / No capacities". Left out because it changes which network the results routes read. That is engine-side work for a GK B plan.
+- Follow-up (logging, UX 34): move the Summary section's cost formatting from `fmtCurrency` onto `utils/money.ts` `money()`, so the Summary and Guided format money the same way.
+- "Loading the headline figures…" stuck: the te 18 build session (session_01G7qCummqEbKc27vW74JbWt) could not reproduce it on microgrid staged or ammonia. The empty-summary half is covered by the breakdown-unreadable sentence. Reopen with a project file if it is seen again.
+- Empty Summary beside an "Out of date" pill (UX 34 on #2140): diagnosed and fixed in #2140. Partial results after a solve fell into "No … for this solve", and the statistics query sat outside the results cache root. The parts not reproduced ("No results yet" after a backend restart, an open page missing a solve started elsewhere) are issue 51.
+- Follow-up (UX 34, non-blocking): the solve's phase line "Auto-discount setup failed: {exc}" (`services/solver/assumptions.py`, moved in #2135) shows raw exception text. Give it plain words.
+- Outside the acceptance and still open: ammonia delivered > made (785 kt vs 672 kt), and "Achieved 0.00‱" on the study card.
+- Follow-up (tests, GK B3 on #2140, non-blocking): two hand-mutant survivors on `objective_decomposition.py` `existing_asset_constant`. M1: test a plain solve on a network with no `curtailment_cost` column and check that `existing_asset_constant` is the whole constant. M3: test a reloaded network where only an extendable generator has a curtailment cost; it must be the whole constant, not None.

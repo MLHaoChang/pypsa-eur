@@ -684,6 +684,12 @@ export interface SimulationStatus {
   /** When the solve behind the dispatch was recorded (ISO-8601 UTC), saved with the project; null when the
    *  dispatch is gone or the project predates the stamp (control-strategy 06). */
   solved_at?: string | null
+  /** What `objective` is, from the solve's own record (template-e2e 18): the LP objective, or under myopic
+   *  foresight and rolling horizon the horizon system cost (undiscounted, as the Summary's total); "unknown"
+   *  for a result solved before the record. Null without an objective. */
+  objective_basis?: 'lp_objective' | 'system_cost' | 'unknown' | null
+  /** The year an LP objective is discounted to (auto period discount), null when it is not discounted. */
+  objective_discounted_to?: number | null
 }
 export interface ValidationIssue {
   severity: 'error' | 'warning'

@@ -27,7 +27,7 @@ describe('SourceRunLine (control-strategy 06, improvement 2)', () => {
     render(<SourceRunLine source="study" missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick } }} />)
     expect(screen.getByTestId('source-run-missing').textContent).toBe('The dispatch solve has not run·Run the solve ›')
     // The "·" is its own flex item, so the gap is even on both sides (no literal space beside it), and so is the one before the link.
-    expect(screen.getByTestId('source-run').textContent).toBe('From the reliability study·The dispatch solve has not run·Run the solve ›')
+    expect(screen.getByTestId('source-run').textContent).toBe('From the reliability studyThe dispatch solve has not run·Run the solve ›')
     fireEvent.click(screen.getByTestId('source-run-action'))
     expect(onClick).toHaveBeenCalledTimes(1)
   })
@@ -36,5 +36,28 @@ describe('SourceRunLine (control-strategy 06, improvement 2)', () => {
     expect(runStamp('nope')).toBeNull()
     expect(runStamp(undefined)).toBeNull()
     expect(runStamp(Date.parse('2026-11-17T15:42:00Z') / 1000)).toBe(runStamp('2026-11-17T15:42:00Z'))
+  })
+})
+
+describe('a run action (template-e2e 18)', () => {
+  it('is a button that acts in place: no "›", and disabled while a run is queued or going', () => {
+    const onClick = vi.fn()
+    render(<SourceRunLine source="study" missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick, kind: 'run', disabled: true } }} />)
+    const btn = screen.getByTestId('source-run-action') as HTMLButtonElement
+    expect(btn.textContent).toBe('Run the solve')
+    expect(btn.disabled).toBe(true)
+    fireEvent.click(btn)
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it('puts the missing run on its own row and binds each "·" to the item after it, so no line starts or ends in one (UX 34)', () => {
+    render(<SourceRunLine source="study" missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: vi.fn(), kind: 'run' } }} />)
+    for (const dot of screen.getByTestId('source-run').querySelectorAll('[aria-hidden="true"]')) {
+      expect(dot.nextElementSibling).not.toBeNull()
+      expect(dot.parentElement?.className).toContain('whitespace-nowrap')
+      expect(dot.previousElementSibling).toBeNull()
+      expect(dot.parentElement?.previousElementSibling).not.toBeNull()
+    }
+    expect(screen.getByTestId('source-run-missing').className).toContain('basis-full')
   })
 })

@@ -8,7 +8,7 @@ import { solveProgressLabel } from '../utils/solveProgress'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { formatRelativeTime } from '../utils/projectActions'
-import { money } from '../utils/money'
+import { objectiveBasis, objectiveFigure, objectiveName } from '../pages/results/costBasis'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: 'text-muted', running: 'text-warn', completed: 'text-success',
@@ -129,9 +129,10 @@ export default function StatusBar() {
   const solvedObjective = liveStatus
     ? (liveStatus.dispatch === 'fresh' ? liveStatus.objective ?? null : null)
     : objective
-  const objStr = solvedObjective != null && Number.isFinite(solvedObjective)
-    ? `${solvedObjective < 0 ? '−' : ''}${money(solvedObjective, 'EUR')}`
-    : '—'
+  const objStr = objectiveFigure(solvedObjective) ?? '—'
+  // Before the status is read its basis is not known: a plain name, never "LP objective" for what may be a
+  // myopic run's system cost (GK B3 on #2140).
+  const figureName = liveStatus ? objectiveName(liveStatus) : 'Objective'
 
   // Prefer the UI store's project name (set on import/load/save) over PyPSA's
   // internal n.name, which defaults to "Unnamed Network" when not explicitly
@@ -194,7 +195,13 @@ export default function StatusBar() {
       <span className="text-border">|</span>
       <span className="text-muted">{snaps?.count ?? 0} snapshots</span>
 
-      <span className="ml-auto text-muted">Obj: {objStr}</span>
+      {/* Template-e2e 18: the figure names its basis (the LP objective, discounted or not, or under
+          myopic/rolling the horizon system cost), as the Results Summary does. */}
+      <span className="ml-auto text-muted" data-testid="statusbar-objective"
+        title={solvedObjective != null && liveStatus ? `${figureName}: ${objectiveBasis(liveStatus)}. Results › Summary says how it relates to the total system cost.` : undefined}>
+        {figureName}: {objStr}
+        {solvedObjective != null && liveStatus?.objective_discounted_to != null && ` (discounted to ${liveStatus.objective_discounted_to})`}
+      </span>
       {solveTime != null && <span className="text-muted">{solveTime}s</span>}
     </div>
   )

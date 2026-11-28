@@ -18,8 +18,10 @@ import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { DC_TEMPLATE, REPORT, SITE_TEMPLATE, review } from '../testFixtures'
 import { EDITED_TEXT, FRESHNESS_UNKNOWN_TEXT, ResultsCard } from './ResultsCard'
 import { useProjectFlow } from '../../../hooks/useProjectFlow'
+import { useProjectRun } from '../../../hooks/useProjectRun'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
+vi.mock('../../../hooks/useProjectRun', () => ({ useProjectRun: vi.fn(() => null) }))
 
 function flowWith(by: Record<string, string | null>, req = { optimisation: true, study: true, loadflow: false }) {
   vi.mocked(useProjectFlow).mockReturnValue({ flow: { deferred: false, run_request: req,
@@ -452,11 +454,25 @@ describe('ResultsCard source run (control-strategy 06)', () => {
     const cost = await screen.findByTestId('hub-results-dispatch-cost')
     expect(cost.textContent).toContain('3.5')
     expect(cost.getAttribute('data-state')).toBe('ready')
-    expect(screen.getByTestId('hub-results-source-from').textContent).toMatch(/^From the dispatch solve, 2026-11-1[78] \d\d:\d\d$/)
+    expect(screen.getByTestId('hub-results-source-from').textContent).toMatch(/^From the optimisation, 2026-11-1[78] \d\d:\d\d$/)
     expect(screen.getByTestId('hub-results-source-missing').textContent)
       .toBe('The reliability study has not run·Go to Goal and run the study ›')
+    // Guided's cost words (UX 34 on #2140): a single period's figure is a year's; no solve, LP or objective.
+    expect(cost.textContent).toContain('Yearly cost')
+    expect(screen.getByTestId('hub-results-dispatch').textContent).not.toMatch(/solve|LP|objective|Total system cost/)
     // The headline's own "Not run yet" is gone; the other chapters keep theirs.
     expect(screen.getByTestId('hub-card-results').textContent).not.toContain('The study writes its verdict, cost and risks here.')
+  })
+
+  it('a discounted multi-period solve reads as the plan\'s cost, discounted, in Guided words (UX 34 on #2140)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved({ objective_basis: 'lp_objective', objective_discounted_to: 2027 })
+    flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    const cost = await screen.findByTestId('hub-results-dispatch-cost')
+    await waitFor(() => expect(cost.textContent).toContain('Cost over the plan (discounted)'))
+    expect(cost.textContent).toContain('discounted to 2027')
+    expect(screen.getByTestId('hub-results-dispatch').textContent).not.toMatch(/solve|LP|objective|Total system cost/)
   })
 
   it('a solve older than the inputs shows its figure out of date, never as current (GK B3 C2)', async () => {
@@ -474,21 +490,45 @@ describe('ResultsCard source run (control-strategy 06)', () => {
     solved({ solved_at: null })
     flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
     mount()
-    expect((await screen.findByTestId('hub-results-source-from')).textContent).toBe('From the dispatch solve')
+    expect((await screen.findByTestId('hub-results-source-from')).textContent).toBe('From the optimisation')
   })
 
   it('with the study and no solve, names the study and offers the solve', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(
       { status: 'idle', objective: null, solve_time: null, dispatch: 'none', solved_at: null } as never)
     const run = vi.fn()
-    useUIStore.setState({ requestRunSolve: run })
+    useUIStore.setState({ requestDispatchSolve: run })
     mount()
     const line = await screen.findByTestId('hub-results-source')
     expect(within(line).getByTestId('hub-results-source-from').textContent).toBe('From the reliability study')
     await waitFor(() => expect(within(line).getByTestId('hub-results-source-missing').textContent)
-      .toBe('The dispatch solve has not run·Run the solve ›'))
+      .toBe('The optimisation has not run·Run the optimisation'))
     fireEvent.click(within(line).getByTestId('hub-results-source-action'))
     expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('while the optimisation runs, says so and offers nothing, never "has not run" beside a greyed button (UX 34)', async () => {
+    vi.mocked(simulationApi.getStatus).mockResolvedValue(
+      { status: 'idle', objective: null, solve_time: null, dispatch: 'none', solved_at: null } as never)
+    vi.mocked(useProjectRun).mockReturnValue({ name: 'Optimisation', stage: 'Solving', steps: '', startedAt: null, jobId: 'j1', queued: false } as never)
+    mount()
+    const line = await screen.findByTestId('hub-results-source')
+    await waitFor(() => expect(within(line).getByTestId('hub-results-source-missing').textContent)
+      .toBe('The optimisation is running…'))
+    expect(within(line).queryByTestId('hub-results-source-action')).toBeNull()
+    vi.mocked(useProjectRun).mockReturnValue(null)
+  })
+
+  it('while another run is going, the optimisation waits for it, with no button (UX 34)', async () => {
+    vi.mocked(simulationApi.getStatus).mockResolvedValue(
+      { status: 'idle', objective: null, solve_time: null, dispatch: 'none', solved_at: null } as never)
+    vi.mocked(useProjectRun).mockReturnValue({ name: 'Grid study', stage: 'Running', steps: '', startedAt: null, jobId: 'j2', queued: false } as never)
+    mount()
+    const line = await screen.findByTestId('hub-results-source')
+    await waitFor(() => expect(within(line).getByTestId('hub-results-source-missing').textContent)
+      .toBe('The optimisation has not run·it can run when the current run finishes'))
+    expect(within(line).queryByTestId('hub-results-source-action')).toBeNull()
+    vi.mocked(useProjectRun).mockReturnValue(null)
   })
 
   it('with the study and a solve, names the study only', async () => {

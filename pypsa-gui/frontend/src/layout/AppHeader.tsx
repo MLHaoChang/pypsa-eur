@@ -13,6 +13,7 @@ import { useHubStudy } from '../pages/hubDesign/useHubData'
 import { finishedStudyLabel } from '../utils/runStatus'
 import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
+import { objectiveFigure, objectiveName } from '../pages/results/costBasis'
 import { useStudyAbort, STUDY_ABORT_TITLE } from '../hooks/useStudyAbort'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
@@ -54,6 +55,26 @@ export function formatObjective(v: number | null | undefined): string | null {
   if (a >= 1e6) return signFirstEuro(v, `${(a / 1e6).toFixed(2)} M`)
   if (a >= 1e3) return signFirstEuro(v, `${(a / 1e3).toFixed(0)} k`)
   return signFirstEuro(v, a.toFixed(0))
+}
+
+/** The solve toast's figure (template-e2e 18): the status bar's figure in its notation, and in Expert its
+ *  name and basis in the status bar's words. The basis is read from the solve's own record once it has been
+ *  fetched after this toast opened, never a cached earlier solve's (#1183); until then the bare figure.
+ *  Guided shows the bare figure: "LP objective" is an Expert word. */
+export function SolvedObjective({ project, objective }: { project: string | null; objective: number | null | undefined }) {
+  const expert = useUIStore(s => s.uiMode) === 'expert'
+  const figure = objectiveFigure(objective)
+  const [openedAt] = useState(() => Date.now())
+  const { data: status, dataUpdatedAt } = useQuery({
+    queryKey: nk(project, 'simulationStatus'),
+    queryFn: simulationApi.getStatus,
+    enabled: !!project && figure != null && expert,
+  })
+  if (figure == null) return <span>Solved</span>
+  const read = expert && status?.objective_basis != null && dataUpdatedAt >= openedAt ? status : null
+  if (read == null) return <span>Solved · {figure}</span>
+  const discounted = read.objective_discounted_to != null ? ` (discounted to ${read.objective_discounted_to})` : ''
+  return <span>Solved · {objectiveName(read)}: {figure}{discounted}</span>
 }
 
 /** Open Results after a solve, on its Summary (the answer first; the Summary
@@ -751,10 +772,9 @@ export default function AppHeader() {
           // Say it finished and where the answer is (UX assessment Q6). Open
           // Results only when nothing else is showing — the same rule the
           // failure branch uses, so a deliberately opened panel stays put.
-          const objective = formatObjective(d.objective)
           toast.success((t) => (
             <span className="flex items-center gap-2" data-testid="solve-done-toast">
-              <span>Solved{objective ? ` · ${objective}` : ''}</span>
+              <SolvedObjective project={proj} objective={d.objective} />
               <button
                 type="button"
                 className="underline font-medium"
@@ -866,7 +886,9 @@ export default function AppHeader() {
     return () => setSolvingReadOnly(false)
   }, [jobRunning, studyRunning, setSolvingReadOnly])
 
-  const handleRunButton = async () => {
+  // `dispatch`: run this project's dispatch solve even where the header's Run is the study (template-e2e 18:
+  // the Summary's and the out-of-date banner's "Run the solve" mean the LOPF whose figures they show).
+  const handleRunButton = async (opts?: { dispatch?: boolean }) => {
     if (studyRunning && !jobRunning && !isRunning) {
       if (!studyAborting) abortStudy.mutate()
       return
@@ -897,7 +919,7 @@ export default function AppHeader() {
       toast.error('Read-only: another user is editing this project.')
       return
     }
-    if (verdictRun) {
+    if (verdictRun && !opts?.dispatch) {
       goalStudy.run.mutate()
       return
     }
@@ -964,14 +986,16 @@ export default function AppHeader() {
   useEffect(() => {
     if (runSolveRequest === seenRunRequest.current) return
     seenRunRequest.current = runSolveRequest
-    if (jobRunning || isRunning || jobQueued) return
+    // A request while any run is going starts nothing and stops nothing: the handler's first branch aborts
+    // a running study, so a running study is checked here too (GK B3 on #2140).
+    if (jobRunning || isRunning || jobQueued || studyRunning) return
     // A study has no network to solve; say where its run is (pio/08).
     if (isStudy) {
       toast('A Study runs from Run study, in its Planning → dynamics panel.')
       return
     }
-    void runHandlerRef.current()
-  }, [runSolveRequest, jobRunning, isRunning, jobQueued, isStudy])
+    void runHandlerRef.current({ dispatch: useUIStore.getState().runSolveDispatch })
+  }, [runSolveRequest, jobRunning, isRunning, jobQueued, studyRunning, isStudy])
 
   return (
     <header data-no-panel-close className="h-11 max-xl:h-auto max-xl:min-h-11 max-xl:flex-wrap max-xl:gap-y-1 max-xl:py-1 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
@@ -1187,7 +1211,7 @@ export default function AppHeader() {
             </button>
           )}
           <button
-            onClick={handleRunButton}
+            onClick={() => { void handleRunButton() }}
             disabled={abort.isPending || studyAborting || enqueue.isPending || goalStudy.run.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'

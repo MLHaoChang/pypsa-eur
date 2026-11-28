@@ -36,7 +36,7 @@ export const ALL_NETWORK_KEYS = [
   // them explicitly so a network swap clears the lot.)
   'vintageBounds', 'vintage_results', 'preflight',
   'results_generators', 'results_lines', 'results_loads', 'results_prices',
-  'results_storage', 'results_statistics', 'resultsBundle',
+  'results_storage', 'resultsBundle',
   // Status query shared by App/AppHeader/SnapshotPicker/Results/OverviewPanel/
   // SolverSettings — invalidate on network swap so the StatusBar / picker
   // don't lag behind a project load by up to their staleTime.

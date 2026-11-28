@@ -25,11 +25,15 @@ import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
+import { simulationApi } from '../../../api/simulation'
+import { guidedCostWords } from '../../results/costBasis'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
 import SourceRunLine from '../../../components/SourceRunLine'
 import { useDispatchRun } from '../../../hooks/useDispatchRun'
+import { useProjectRun } from '../../../hooks/useProjectRun'
+import { RUN_NAME } from '../../../utils/runStatus'
 import { money, unitPrice } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
 import { FrontTile } from './FrontTile'
@@ -99,7 +103,11 @@ export function ResultsCard() {
   const solved = useDispatchSolved()
   // The dispatch solve, for the source-run line (control-strategy 06, improvement 2).
   const run = useDispatchRun()
-  const requestRunSolve = useUIStore(s => s.requestRunSolve)
+  const requestDispatchSolve = useUIStore(s => s.requestDispatchSolve)
+  const projectRun = useProjectRun()
+  const runBusy = projectRun != null
+  // While a run is queued or going, the missing solve's line says so instead of offering it (UX 34 on #2140).
+  const solveBusy = projectRun == null ? undefined : projectRun.name === RUN_NAME.solve ? 'self' as const : 'other' as const
   // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
   // named once under the list, never ranked in it.
   const rows = report ? fmeaTopRows(report) : []
@@ -122,6 +130,13 @@ export function ResultsCard() {
     queryKey: nk(project, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods,
     enabled: !!project && multiPeriod,
   })
+  // The dispatch solve's cost in Guided's words (UX 34 on #2140): its basis from the status, its periods
+  // from the network (the study's report is not there before the study ran).
+  const simStatus = useQuery({ queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus, enabled: !!project })
+  const networkPeriods = useQuery({
+    queryKey: nk(project, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods, enabled: !!project,
+  })
+  const dispatchWords = guidedCostWords(simStatus.data, (networkPeriods.data?.periods?.length ?? 0) > 1)
   const setStep = useHubDesignStore(s => s.setStep)
   // Results that came with the project, never checked against its inputs (PG-12): never read as current.
   const uncheckedKinds = useUncheckedRunKinds()
@@ -156,10 +171,10 @@ export function ResultsCard() {
           // An Expert solve with no study is never "Not run yet" (control-strategy 06): its cost, from the
           // dispatch solve, out of date when the backend says so, and the study offered by name.
           <div className="flex flex-col gap-1.5" data-testid="hub-results-dispatch">
-            <Kpi testId="hub-results-dispatch-cost" headline label="Total system cost"
+            <Kpi testId="hub-results-dispatch-cost" headline label={dispatchWords.label}
               value={`${run.objective < 0 ? '−' : ''}${money(run.objective, 'EUR')}`}
-              state={run.current ? 'ready' : 'stale'} basis="the dispatch solve's objective" />
-            <SourceRunLine testId="hub-results-source" source="dispatch" at={run.at} outOfDate={!run.current}
+              state={run.current ? 'ready' : 'stale'} basis={dispatchWords.basis} />
+            <SourceRunLine testId="hub-results-source" mode="guided" source="dispatch" at={run.at} outOfDate={!run.current}
               missing={{ run: 'study', action: { label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) } }} />
           </div>
         ) : (
@@ -242,9 +257,9 @@ export function ResultsCard() {
       )}
 
       {/* Which run the verdict and figures come from; the dispatch solve offered when it has not run. */}
-      <SourceRunLine testId="hub-results-source" source="study" at={study?.finished_at ?? null}
+      <SourceRunLine testId="hub-results-source" mode="guided" source="study" at={study?.finished_at ?? null}
         outOfDate={stale || study?.edited_since_study === true}
-        missing={run && !run.solved ? { run: 'dispatch', action: { label: 'Run the solve', onClick: requestRunSolve } } : undefined} />
+        missing={run && !run.solved ? { run: 'dispatch', action: { label: 'Run the optimisation', onClick: () => requestDispatchSolve(), kind: 'run', disabled: runBusy }, busy: solveBusy } : undefined} />
 
       {/* An edit since the study makes the study's figures out of date too: the edited banner is their
           mark, and the headline's mixed-source line and chart then say so (review P1, GK B G1). */}
