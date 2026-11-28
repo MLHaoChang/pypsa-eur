@@ -219,3 +219,22 @@ def test_only_the_runs_labelled_rows_reach_the_report():
     run = {"recorded": True, "rows": ["junk", {"shown": "x"}, {"label": "L", "shown": "s", "reason": "r"}]}
     assert template_ledger_payload({"ledger": []}, run)["run"]["rows"] == [
         {"label": "L", "shown": "s", "reason": "r"}]
+
+
+def test_every_template_report_lists_each_assumed_input_the_results_list():
+    """template-e2e 26: Guided and Expert results list every ledger row whose source is `assumed`
+    (AssumptionsBehindResult); the report's template-assumptions table must carry the same rows."""
+    import pytest
+
+    import project_templates.eh_templates as T
+
+    assert T.TEMPLATE_META
+    for tid, meta in T.TEMPLATE_META.items():
+        assumed = [r for r in meta.get("ledger", []) if r.get("source") == "assumed"]
+        ev = _collect(template_ledger=meta)
+        table = ev.tables.get("template_ledger")
+        if table is None:
+            pytest.fail(f"{tid}: no template-assumptions table in the report")
+        shown = {(row[0], row[3]) for row in table.rows}
+        for r in assumed:
+            assert (E.F.fmt_text(r.get("label") or r["item"]), "assumed") in shown, (tid, r["item"])
