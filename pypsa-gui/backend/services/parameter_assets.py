@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from services.asset_schema import lookup, ranges
+from services.asset_schema import fields, lookup, ranges
 from services.asset_schema.schema import CLASS_ATTR
 
 
@@ -57,6 +57,18 @@ def _bus_carriers(n) -> dict[str, str]:
     return {str(k): str(v) for k, v in buses["carrier"].items()}
 
 
+def _unit_on(n, component: str, name: str, spec) -> tuple[str | None, float]:
+    """The unit and scale this asset's value shows in: per tonne on a tonne bus, as the Expert panel
+    reads it (`fields.cost_units` / `fields.size_units`), else the class-level unit and scale."""
+    cost = fields.cost_units(n, component, name).get(spec.key)
+    if cost is not None:
+        return cost["unit"], cost["scale"]
+    size = fields.size_units(n, component, name).get(spec.key)
+    if size is not None:
+        return size, spec.scale
+    return spec.unit_display or None, spec.scale
+
+
 def assets(n, entry, type_id: str | None) -> list[dict[str, Any]]:
     """Every asset of the entry's class (of `type_id` when given), with its value in display units."""
     attr = CLASS_ATTR.get(entry.scope)
@@ -74,18 +86,16 @@ def assets(n, entry, type_id: str | None) -> list[dict[str, Any]]:
             continue
         stored = _scalar(row[spec.key]) if spec.key in row.index else None
         assumed = _is_assumed(stored, default)
+        unit, scale = _unit_on(n, entry.scope, str(name), spec)
         value = stored
-        if (
-            isinstance(stored, (int, float))
-            and not isinstance(stored, bool)
-            and spec.scale != 1
-        ):
-            value = stored * spec.scale
+        if isinstance(stored, (int, float)) and not isinstance(stored, bool) and scale != 1:
+            value = stored * scale
         out.append(
             {
                 "name": str(name),
                 "asset_type": t.id if t is not None else None,
                 "value": value,
+                "unit": unit,
                 "assumed": bool(assumed),
             }
         )

@@ -20,6 +20,7 @@ from fastapi import HTTPException
 
 from harness import catalogue
 from services import chat_plain_names, chat_tools
+from services import parameter_assets as PA
 from services.asset_schema import catalogue as C
 from services.asset_schema import lookup
 from services.chat_dispatchers import expert_catalogue as X
@@ -101,6 +102,7 @@ def test_find_parameter_answers_the_entry_and_the_open_projects_assets(baseline)
             "name": "G1",
             "asset_type": gen["assets"][0]["asset_type"],
             "value": 20.0,
+            "unit": "MW",
             "assumed": False,
         }
     ]
@@ -160,6 +162,23 @@ def test_assets_are_capped_at_ten_with_the_total(client, session_ctx, install_ne
     assert gen["assets_total"] == 13 and gen["assets_truncated"] is True
 
 
+def test_an_asset_on_a_tonne_bus_shows_its_value_per_tonne():
+    # As the Expert panel reads it (`fields.cost_units` / `size_units`): per t/h at
+    # scale 1 on a tonne bus, the class-level EUR/kW/yr (x 0.001) on an energy bus.
+    n = pypsa.Network()
+    n.add("Bus", "t0", carrier="AC", unit="t")
+    n.add("Bus", "e0", carrier="AC")
+    n.add("Bus", "e1", carrier="AC")
+    n.add("Link", "tonne", bus0="t0", bus1="e1", p_nom=5, capital_cost=2000.0)
+    n.add("Link", "energy", bus0="e0", bus1="e1", p_nom=5, capital_cost=2000.0)
+    cost, _ = lookup.resolve("link.yearly_capital_cost")
+    size, _ = lookup.resolve("link.capacity")
+    got = {a["name"]: (a["value"], a["unit"]) for a in PA.assets(n, cost, None)}
+    assert got == {"tonne": (2000.0, "EUR/(t/h)/yr"), "energy": (2.0, "EUR/kW/yr")}
+    got = {a["name"]: (a["value"], a["unit"]) for a in PA.assets(n, size, None)}
+    assert got == {"tonne": (5.0, "t/h"), "energy": (5.0, "MW")}
+
+
 def test_with_no_project_open_the_entries_come_without_assets(monkeypatch):
     monkeypatch.setattr(
         chat_tools.PyPSAService, "get_loaded_project", classmethod(lambda cls: None)
@@ -176,6 +195,25 @@ def test_an_unknown_filter_is_refused(args):
     with pytest.raises(HTTPException) as exc:
         X.find_parameter("capacity", **args)
     assert exc.value.detail["error_kind"] == "invalid_parameter_filter"
+
+
+def test_an_internal_asset_type_is_refused_as_the_palette_hides_it(monkeypatch):
+    real = lookup.ASSET_TYPES[0]
+    hidden = dataclasses.replace(real, internal=True)
+    monkeypatch.setattr(lookup, "asset_type", lambda tid: hidden if tid == real.id else None)
+    with pytest.raises(HTTPException) as exc:
+        X.find_parameter("capacity", asset_type=real.id)
+    assert exc.value.detail["error_kind"] == "invalid_parameter_filter"
+
+
+def test_an_unknown_function_reads_as_the_catalogue_route_refuses_it():
+    from services.asset_schema.catalogue import UnknownFilter, check_filters
+
+    with pytest.raises(UnknownFilter) as route:
+        check_filters("teleport", None)
+    with pytest.raises(HTTPException) as chat:
+        X.find_parameter("capacity", function="teleport")
+    assert chat.value.detail["message"] == str(route.value)
 
 
 def test_a_viewer_reads_and_a_non_member_is_refused(world, as_user):
@@ -257,6 +295,16 @@ def test_an_unknown_id_is_unknown_parameter_and_an_absent_asset_is_not_found(bas
         exc.value.detail["message"]
         == "Capacity: 'L1' is a Load, and Capacity is a Generator parameter."
     )
+
+
+def test_an_asset_with_no_project_open_is_no_active_project(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools.PyPSAService, "get_loaded_project", classmethod(lambda cls: None)
+    )
+    with pytest.raises(HTTPException) as exc:
+        X.open_parameter("generator.capacity", asset="G1")
+    d = exc.value.detail
+    assert d["error_kind"] == "no_active_project" and "upload" not in d["message"]
 
 
 def test_the_model_sees_the_entry_it_opened():
@@ -342,6 +390,47 @@ def test_write_results_carry_plain_names_and_refusals_name_the_column():
     assert (
         exc.value.detail == "marginal_cost is not a number"
     )  # plain text: passed on as it is
+
+
+def test_a_refusal_names_the_column_its_text_names_first():
+    def refuse(component_class, name, attrs):
+        raise HTTPException(
+            422, detail={"error_kind": "invalid", "message": "p_nom_min must not exceed p_nom"}
+        )
+
+    wrapped = chat_plain_names.with_plain_names(
+        refuse, columns=chat_plain_names._keys_of("attrs")
+    )
+    with pytest.raises(HTTPException) as exc:
+        wrapped("Generator", "G1", {"p_nom": 1, "p_nom_min": 2})
+    assert exc.value.detail["field"] == "p_nom_min"
+
+
+def test_a_schema_refusal_names_the_column_with_the_same_kind_and_text():
+    from pydantic import BaseModel, ValidationError
+    from harness.results import _error_result_content
+
+    class Body(BaseModel):
+        p_nom: float
+        other: float = 0
+
+    def create(component_class, name, attrs):
+        return Body(**attrs)
+
+    wrapped = chat_plain_names.with_plain_names(
+        create, columns=chat_plain_names._keys_of("attrs")
+    )
+    with pytest.raises(ValidationError) as raw:
+        create("Generator", "G1", {"p_nom": "big"})
+    with pytest.raises(HTTPException) as exc:
+        wrapped("Generator", "G1", {"p_nom": "big"})
+    d = exc.value.detail
+    assert d["error_kind"] == "validation_error" and d["message"] == str(raw.value)
+    assert d["field"] == "p_nom" and d["plain_name"] == "Capacity"
+    assert "Capacity (p_nom): " in _error_result_content(d, exc.value, d["error_kind"])
+    # A column the call does not write keeps the raw ValidationError.
+    with pytest.raises(ValidationError):
+        wrapped("Generator", "G1", {"p_nom": 1, "other": "x"})
 
 
 def test_the_generic_write_tools_are_wrapped():

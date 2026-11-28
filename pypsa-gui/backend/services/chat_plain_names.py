@@ -22,6 +22,7 @@ from typing import Any
 from collections.abc import Callable
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from services.asset_schema import lookup
 
@@ -49,10 +50,14 @@ def _named_column(detail: Any, names: dict[str, str]) -> str | None:
         text = detail
     if not isinstance(text, str):
         return None
+    # The column the text names first, not the first of the call's columns: in
+    # "p_nom_min must not exceed p_nom" the refusal is about p_nom_min.
+    hits = []
     for k in names:
-        if re.search(rf"(?<![\w]){re.escape(k)}(?![\w])", text):
-            return k
-    return None
+        m = re.search(rf"(?<![\w]){re.escape(k)}(?![\w])", text)
+        if m:
+            hits.append((m.start(), k))
+    return min(hits)[1] if hits else None
 
 
 def with_plain_names(
@@ -84,6 +89,23 @@ def with_plain_names(
                     "plain_name": names[key],
                 }
             raise
+        except ValidationError as exc:
+            # A schema refusal (a bad value for one column) before the route runs.
+            # Same kind and text as before, with the column's plain name beside it.
+            errs = exc.errors()
+            loc = errs[0].get("loc") if errs else None
+            key = loc[0] if loc and loc[0] in names else None
+            if key is None:
+                raise
+            raise HTTPException(
+                422,
+                detail={
+                    "error_kind": "validation_error",
+                    "message": str(exc),
+                    "field": key,
+                    "plain_name": names[key],
+                },
+            ) from exc
         if names and isinstance(result, dict) and "plain_names" not in result:
             result = {**result, "plain_names": names}
         return result

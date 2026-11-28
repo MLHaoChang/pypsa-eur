@@ -23,7 +23,7 @@ from fastapi import HTTPException
 
 from services import parameter_assets as PA
 from services.asset_schema import lookup
-from services.asset_schema.catalogue import FUNCTION_IDS, guide_body
+from services.asset_schema.catalogue import UnknownFilter, check_filters, guide_body
 from services.asset_schema.schema import CLASS_ATTR
 
 #: Most entries one answer lists, and most assets per entry (spec §7.1).
@@ -37,7 +37,8 @@ def find_parameter(
     query: str, asset_type: str | None = None, function: str | None = None
 ) -> dict:
     """Up to 8 catalogue entries for `query`, each with the open project's assets (10 at most)."""
-    if asset_type is not None and lookup.asset_type(asset_type) is None:
+    t = lookup.asset_type(asset_type) if asset_type is not None else None
+    if asset_type is not None and (t is None or t.internal):
         raise HTTPException(
             422,
             detail={
@@ -46,15 +47,17 @@ def find_parameter(
                 "message": f"There is no asset type '{asset_type}'.",
             },
         )
-    if function is not None and function not in FUNCTION_IDS:
+    try:
+        check_filters(function, None)
+    except UnknownFilter as exc:
         raise HTTPException(
             422,
             detail={
                 "error_kind": "invalid_parameter_filter",
                 "field": "function",
-                "message": f"There is no function '{function}'. Use one of: {', '.join(FUNCTION_IDS)}.",
+                "message": str(exc),
             },
-        )
+        ) from exc
     n = PA.active_network()
     results = []
     for e in lookup.search(
@@ -95,10 +98,19 @@ def open_parameter(entry_id: str, asset: str | None = None) -> dict:
             },
         )
     if asset is not None:
-        from services.chat_tools import _require_active_project
-
-        _require_active_project()
         n = PA.active_network()
+        if n is None:
+            raise HTTPException(
+                400,
+                detail={
+                    "error_kind": "no_active_project",
+                    "field": "asset",
+                    "message": (
+                        "No project is open, so there is no asset to open the parameter on. "
+                        "Open a project, or call open_parameter without `asset`."
+                    ),
+                },
+            )
         attr = CLASS_ATTR.get(entry.scope)
         df = getattr(n, attr, None) if attr else None
         if df is None or asset not in df.index:

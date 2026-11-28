@@ -26,7 +26,7 @@ TOOLS = [
         "model_name, component_class, asset_types (the asset type ids it applies to), group, unit, short_help, guide (the "
         "parameter guide's text, quote it to explain the parameter) and the "
         "active project's assets that carry it: `assets` [{name, value, "
-        "assumed}] (at most 10; `assumed` is true when the value was left "
+        "unit, assumed}] (at most 10; `unit` is the value's unit on that asset, per tonne on a tonne bus; `assumed` is true when the value was left "
         "at its default), `assets_total` and `assets_truncated`. Narrow with "
         "asset_type (an asset type id, e.g. pvRoof, bess) and/or function "
         "(dispatch, expansion, load_flow, short_circuit, grid_compliance, adequacy or finance). Use it to answer where a parameter is set, "
@@ -62,7 +62,8 @@ TOOLS = [
         "result names both (`current_id`, `former_id`). Refused, no "
         "navigation: unknown_parameter (no entry has that id: call "
         "find_parameter), component_not_found (no such asset of that "
-        "parameter's class in the open project; an asset of another class is named as such). Safety: read.",
+        "parameter's class in the open project; an asset of another class is named as such), no_active_project "
+        "(asset given with no project open). Safety: read.",
         {
             "entry_id": {"type": "string", "minLength": 1, "maxLength": 200},
             "asset": {
