@@ -88,7 +88,11 @@ def assets(n, entry, type_id: str | None) -> list[dict[str, Any]]:
         assumed = _is_assumed(stored, default)
         unit, scale = _unit_on(n, entry.scope, str(name), spec)
         value = stored
-        if isinstance(stored, (int, float)) and not isinstance(stored, bool) and scale != 1:
+        if (
+            isinstance(stored, (int, float))
+            and not isinstance(stored, bool)
+            and scale != 1
+        ):
             value = stored * scale
         out.append(
             {

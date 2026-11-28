@@ -200,7 +200,9 @@ def test_an_unknown_filter_is_refused(args):
 def test_an_internal_asset_type_is_refused_as_the_palette_hides_it(monkeypatch):
     real = lookup.ASSET_TYPES[0]
     hidden = dataclasses.replace(real, internal=True)
-    monkeypatch.setattr(lookup, "asset_type", lambda tid: hidden if tid == real.id else None)
+    monkeypatch.setattr(
+        lookup, "asset_type", lambda tid: hidden if tid == real.id else None
+    )
     with pytest.raises(HTTPException) as exc:
         X.find_parameter("capacity", asset_type=real.id)
     assert exc.value.detail["error_kind"] == "invalid_parameter_filter"
@@ -395,7 +397,11 @@ def test_write_results_carry_plain_names_and_refusals_name_the_column():
 def test_a_refusal_names_the_column_its_text_names_first():
     def refuse(component_class, name, attrs):
         raise HTTPException(
-            422, detail={"error_kind": "invalid", "message": "p_nom_min must not exceed p_nom"}
+            422,
+            detail={
+                "error_kind": "invalid",
+                "message": "p_nom_min must not exceed p_nom",
+            },
         )
 
     wrapped = chat_plain_names.with_plain_names(
