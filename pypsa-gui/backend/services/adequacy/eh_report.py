@@ -680,9 +680,39 @@ def mark_legacy_report(body: dict) -> dict:
         **fmea, "payload": mark_legacy_fmea_top(fmea["payload"])}}}
 
 
-def eh_reference_design_http_payload(store: dict) -> tuple[dict | None, int]:
-    """Return (body, status) for GET /results/eh_reference_design."""
-    report = load_eh_report(store)
+def record_report(record: dict | None) -> dict | None:
+    """The report a study record keeps, or None: the ONE rule the export and
+    ``eh_review.review_latest`` share. Any record that is not still running
+    (done, failed, aborted, partial) may hold one; a running record's report
+    describes a different run."""
+    if not isinstance(record, dict) or record.get("status") == "running":
+        return None
+    rep = record.get("report")
+    return rep if isinstance(rep, dict) else None
+
+
+def eh_reference_design_http_payload(
+        store: dict, record: dict | None = None) -> tuple[dict | None, int]:
+    """Return (body, status) for GET /results/eh_reference_design.
+
+    TE2E-16: a later foreground solve clears the stored report, but the study
+    record keeps its own copy. With ``record`` given, that copy is served in
+    the same export shape instead of 204. The body then carries ``stale``
+    (true when it came from the record) and ``edited_since_study`` (the
+    record's own value, as ``eh_review`` reports it), so a saved file says it
+    is from an earlier run. Both keys are only added when ``record`` is given.
+    """
+    report, stale = load_eh_report(store), False
+    if report is None and record_report(record) is not None:
+        try:
+            report = ReferenceDesignReport.model_validate(record_report(record))
+            stale = True
+        except ValueError:
+            report = None
     if report is None:
         return None, 204
-    return mark_legacy_report(export_reference_design(report)), 200
+    body = mark_legacy_report(export_reference_design(report))
+    if isinstance(record, dict):
+        body["stale"] = stale
+        body["edited_since_study"] = record.get("edited_since_study")
+    return body, 200
