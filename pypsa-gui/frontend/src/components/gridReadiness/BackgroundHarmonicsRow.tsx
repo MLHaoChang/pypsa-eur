@@ -79,7 +79,7 @@ export default function BackgroundHarmonicsRow() {
           onChange={e => setFile(e.target.files?.[0] ?? null)} className="max-w-[14rem]" />
       </div>
       <span className="block text-[11px] text-muted">
-        A CSV with the harmonic order and its voltage in % of the nominal fundamental, up to 1 MiB.</span>
+        A CSV with the harmonic order and its voltage in % of the nominal fundamental, up to 1 MB.</span>
       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
         <button type="button" disabled={!file || !source.trim() || !measuredOn || busy} onClick={() => upload.mutate()}
           className="rounded border border-border px-2 py-0.5 disabled:opacity-50">
@@ -96,6 +96,11 @@ export default function BackgroundHarmonicsRow() {
           </span>
         )}
       </div>
+      {!busy && (!file || !source.trim() || !measuredOn) && (
+        <span className="block text-[11px] text-muted" data-testid="background-disabled-reason">
+          To save: {[!file && 'choose a file', !source.trim() && 'enter the source', !measuredOn && 'enter the date']
+            .filter(Boolean).join(', ')}.</span>
+      )}
       {error && <p role="alert" className="text-[11px] text-warn" data-testid="background-upload-error">{error}</p>}
     </li>
   )

@@ -36,7 +36,7 @@ export default function CampusHarmonicEmissionSection({ emission }: { emission: 
     return (
       <PageSection title={TITLE}>
         <p data-testid="emission-not-computed" className="px-4 py-3 text-[12px] text-muted">
-          Not computed for this run. Rerun the study to add the emission screen.
+          Not yet available: this run is from before the emission screen. Rerun the study to add it.
         </p>
       </PageSection>
     )
