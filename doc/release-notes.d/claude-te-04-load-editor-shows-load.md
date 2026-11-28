@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A load's profile editor opens on the load's own shape and peak, and asks for the peak in the load's own unit (t/h on a tonne bus) instead of "Peak MW". Plain labels replace `p_set`, `p_nom`, `e_nom`, `s_nom`, `v_nom` and `MC` in the Properties panel.

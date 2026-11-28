@@ -62,6 +62,26 @@ def inflow_applies(ctx, component: str) -> bool:
     return component in inflow.columns and bool((inflow[component] != 0).any())
 
 
+def _load_peak_and_unit(ctx, series: pd.Series, component: str) -> dict:
+    """A load's series peak and the unit of its bus (t/h on a tonne bus), so
+    the editor opens on the load's own peak in the load's own unit."""
+    from services.flow_service import _size_unit
+
+    out: dict[str, Any] = {}
+    values = pd.to_numeric(series, errors="coerce").abs()
+    if len(values) and values.notna().any():
+        out["peak"] = float(values.max())
+    try:
+        n = ctx.network
+        bus = n.loads.at[component, "bus"]
+        out["unit"] = _size_unit(n, bus, stock=False)
+        out["energy_unit"] = _size_unit(n, bus, stock=True)
+    except Exception:  # noqa: BLE001 — a gone load or unreadable bus has no known unit
+        out["unit"] = None
+        out["energy_unit"] = None
+    return out
+
+
 def describe_current(ctx, component_type: str, attribute: str, component: str) -> dict:
     """What the component carries now: none, a generated series (its family
     and provenance) or an upload, which has no generator record. For a
@@ -75,6 +95,8 @@ def describe_current(ctx, component_type: str, attribute: str, component: str) -
     meta = ctx.user_ts_meta.get(key) or {}
     idx = series.index
     stamps = pd.DatetimeIndex(idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
+    if (component_type, attribute) == ("loads", "p_set"):
+        extra = {**extra, **_load_peak_and_unit(ctx, series, component)}
     return {
         "exists": True,
         # The network's own series reads "network", the editors' word for it (RP-14).

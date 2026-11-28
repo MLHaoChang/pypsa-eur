@@ -6,7 +6,7 @@ import type { GoalValue } from '../../api/flow'
 import { openReliabilityGoal, openSiteType } from '../../layout/flowNavigation'
 import { ASSUMED_GOAL_SOURCE, assumedLole, goalWords, MAX_GOAL_DRAWS, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { AssumedChip } from '../AssumedChip'
-import { siteTypeLabel } from './SiteTypeSelect'
+import { siteTypeShort } from './SiteTypeSelect'
 
 export const NO_GOAL = 'No reliability goal set.'
 /** A stored 0 h/yr is a valid goal (the EH study certifies against it), but a
@@ -81,9 +81,7 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false, m
           + `until the estimate's spread is under ${pct(MC_COV_TARGET)} %, up to `
           + MAX_GOAL_DRAWS.toLocaleString('en-GB'))
       else {
-        // The select's own label and wording ("Grid connection: None — …").
-        const l = siteTypeLabel(goal.site_archetype.value)
-        parts.push(`grid connection: ${l[0].toLowerCase()}${l.slice(1)}${sourceNote(goal.site_archetype)}`)
+        parts.push(`grid connection: ${siteTypeShort(goal.site_archetype.value)}${sourceNote(goal.site_archetype)}`)
       }
     }
   }

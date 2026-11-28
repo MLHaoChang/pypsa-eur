@@ -511,6 +511,8 @@ def test_a_study_without_front_is_masters():
     assert (
         report.sections["levers"].payload["base_cost_eur"] == report.cost_at_target_eur
     )
+    # The sizing payload's horizon (template-e2e 20, #2138): pinned here by value.
+    assert report.sections["sizing"].payload["horizon"] == "8,760 h"
     assert (
         _digest(
             report.model_dump_json(
@@ -520,6 +522,7 @@ def test_a_study_without_front_is_masters():
                     "sections": {
                         "tea": {"payload": new},
                         "levers": {"payload": {"base_cost_eur"}},
+                        "sizing": {"payload": {"horizon"}},
                     },
                 }
             )

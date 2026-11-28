@@ -55,3 +55,5 @@ Waiting on other PRs / later slices:
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.
+
+- 2026-11-28 (te 04 PR, claude/te-04-load-editor-shows-load): the PropertiesPanel p_set/p_nom/e_nom/s_nom/v_nom/MC allow rows are done (label text only; rows deleted from uiCopyGuard.allow.json).
