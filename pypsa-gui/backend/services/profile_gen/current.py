@@ -73,9 +73,12 @@ def _load_peak_and_unit(ctx, series: pd.Series, component: str) -> dict:
         out["peak"] = float(values.max())
     try:
         n = ctx.network
-        out["unit"] = _size_unit(n, n.loads.at[component, "bus"], stock=False)
+        bus = n.loads.at[component, "bus"]
+        out["unit"] = _size_unit(n, bus, stock=False)
+        out["energy_unit"] = _size_unit(n, bus, stock=True)
     except Exception:  # noqa: BLE001 — a gone load or unreadable bus has no known unit
         out["unit"] = None
+        out["energy_unit"] = None
     return out
 
 

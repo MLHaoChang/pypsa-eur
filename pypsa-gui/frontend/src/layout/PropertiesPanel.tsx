@@ -845,7 +845,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
         <span className="text-xs text-muted">
           {hasProfile && profileMeta.has_profile
             ? `Profile loaded · ${profileMeta.rows} pts · peak ${profileMeta.peak?.toFixed(1)} ${fieldUnit(schema, 'p_set', 'MW')}`
-            : 'No profile — the fixed demand is used'}
+            : 'No profile: the fixed demand is used'}
         </span>
       </div>
       <ExtrasSection

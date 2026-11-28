@@ -111,7 +111,7 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     if (known && currentKind) setChoice(currentKind)
   }
   const peakUnit = current?.unit || 'MW'
-  const energyUnit = peakUnit === 'MW' ? 'MWh' : peakUnit.endsWith('/h') ? peakUnit.slice(0, -2) : `${peakUnit}·h`
+  const energyUnit = current?.energy_unit || 'MWh'
   const peakLabel = `Peak load (${peakUnit})`
   const energyLabel = `Annual energy (${energyUnit})`
   const replay = useReplay(project, 'loads', 'p_set', component, archetypeName)

@@ -116,7 +116,17 @@ def test_a_load_series_states_its_peak_and_the_bus_unit():
     _user_ts[KEY] = pd.Series(5.0, index=n.snapshots)
     _user_ts[KEY].iloc[3] = 7.5
     cur = describe_current(_ctx(), *KEY)
-    assert cur["peak"] == 7.5 and cur["unit"] == "t/h"
+    assert cur["peak"] == 7.5 and cur["unit"] == "t/h" and cur["energy_unit"] == "t"
+
+
+def test_a_product_bus_load_names_its_product_in_both_units():
+    n = _net()
+    n.add("Carrier", "NH3")
+    n.buses.at["site", "carrier"] = "NH3"
+    n.buses.at["site", "unit"] = "MWh"
+    _user_ts[KEY] = pd.Series(5.0, index=n.snapshots)
+    cur = describe_current(_ctx(), *KEY)
+    assert cur["unit"] == "MW_NH3" and cur["energy_unit"] == "MWh_NH3"
 
 
 def test_no_current_series_is_refused():
