@@ -23,6 +23,14 @@ vi.mock('../hooks/useSolveQueue', () => ({
 let projectRun: RunView | null = null
 let hubStudy: EhStudyPayload | null = null
 vi.mock('../pages/hubDesign/useHubData', () => ({ useHubStudy: () => ({ study: hubStudy }) }))
+const verdict = vi.hoisted(() => ({ hasStudy: false, body: null as object | null, mutate: vi.fn() }))
+vi.mock('../hooks/useVerdictStudyEntry', () => ({ useVerdictStudyEntry: () => ({ hasStudy: verdict.hasStudy }) }))
+vi.mock('../pages/hubDesign/useGoalStudy', () => ({
+  useGoalStudy: () => ({
+    built: { body: verdict.body }, vollMissing: false, problem: null,
+    run: { mutate: verdict.mutate, isPending: false },
+  }),
+}))
 vi.mock('../hooks/useProjectRun', () => ({ useProjectRun: () => projectRun }))
 
 vi.mock('../auth/AuthModeProvider', () => ({
@@ -124,6 +132,26 @@ describe('AppHeader during a Guided study (template-e2e 25)', () => {
     renderHeader()
     expect(screen.queryByRole('button', { name: /Abort/ })).toBeNull()
     expect(useUIStore.getState().solvingReadOnly).toBe(false)
+  })
+})
+
+describe('one Run entry in Expert (template-e2e 17, TE2E-17-RUN-1)', () => {
+  it('runs the verdict study from the header Run, labelled Run study', async () => {
+    verdict.hasStudy = true; verdict.body = { goal: 1 }; verdict.mutate.mockClear()
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'p', readOnly: false } as never)
+    renderHeader()
+    const btn = await screen.findByRole('button', { name: /Run study/ })
+    fireEvent.click(btn)
+    await waitFor(() => expect(verdict.mutate).toHaveBeenCalledTimes(1))
+    verdict.hasStudy = false; verdict.body = null
+  })
+
+  it('keeps the LOPF label where the project has no verdict study', async () => {
+    verdict.hasStudy = false
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    expect(await screen.findByTitle(/queues the solve/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Run study/ })).toBeNull()
   })
 })
 

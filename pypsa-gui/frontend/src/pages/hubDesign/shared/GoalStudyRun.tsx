@@ -13,7 +13,7 @@ import { useRunGate } from '../../../hooks/useRunGate'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { STUDY_ABORT_TITLE } from '../../../hooks/useStudyAbort'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
-import { useFlowScope, useInScope } from '../../../components/flowScope/useFlowScope'
+import { useVerdictStudyEntry } from '../../../hooks/useVerdictStudyEntry'
 import { useGoalStudy } from '../useGoalStudy'
 import { useUIStore } from '../../../store/uiStore'
 import { useSimulationStore } from '../../../store/simulationStore'
@@ -29,19 +29,15 @@ export function GoalStudyRun() {
     project, study, running, templateUnknown, refetchTemplate, vollMissing, built, run, abort, aborting, problem,
   } = useGoalStudy()
   // The scope (W4a): with Reliability › goal & study off, the study is not run.
-  const reliabilityOn = useInScope('reliability', 'goal_study')
+  const { reliabilityOn, goalOpt, solveOnly } = useVerdictStudyEntry()
   // The title follows ScopeGate's branch: "add…" only where the sub-option can
   // be added; where it isn't offered, the registry's reason.
-  const { registry } = useFlowScope()
-  const goalOpt = registry?.cards.find(c => c.id === 'reliability')
-    ?.options.find(o => o.id === 'goal_study')
   const outOfScopeTitle = goalOpt && goalOpt.status !== 'available'
     ? (goalOpt.reason ? `Not offered for this site: ${goalOpt.reason}` : 'Not offered for this site.')
     : RELIABILITY_OUT_OF_SCOPE
   // A site with no reliability study to run (generation-only) has one Run, the
   // optimisation: the header's gated Run, so the gate and the save are the
   // same (owner decision GENONLY-RUN-1).
-  const solveOnly = goalOpt != null && goalOpt.status !== 'available'
   const status = study?.status
   const again = status === 'failed' || status === 'aborted' || status === 'done'
   const pipeline = study?.report?.pipeline
