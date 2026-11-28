@@ -30,6 +30,7 @@ import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
 import SourceRunLine from '../../../components/SourceRunLine'
 import { useDispatchRun } from '../../../hooks/useDispatchRun'
+import { useProjectRun } from '../../../hooks/useProjectRun'
 import { money, unitPrice } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
 import { FrontTile } from './FrontTile'
@@ -99,7 +100,8 @@ export function ResultsCard() {
   const solved = useDispatchSolved()
   // The dispatch solve, for the source-run line (control-strategy 06, improvement 2).
   const run = useDispatchRun()
-  const requestRunSolve = useUIStore(s => s.requestRunSolve)
+  const requestDispatchSolve = useUIStore(s => s.requestDispatchSolve)
+  const runBusy = useProjectRun() != null
   // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
   // named once under the list, never ranked in it.
   const rows = report ? fmeaTopRows(report) : []
@@ -244,7 +246,7 @@ export function ResultsCard() {
       {/* Which run the verdict and figures come from; the dispatch solve offered when it has not run. */}
       <SourceRunLine testId="hub-results-source" source="study" at={study?.finished_at ?? null}
         outOfDate={stale || study?.edited_since_study === true}
-        missing={run && !run.solved ? { run: 'dispatch', action: { label: 'Run the solve', onClick: requestRunSolve } } : undefined} />
+        missing={run && !run.solved ? { run: 'dispatch', action: { label: 'Run the optimisation', onClick: () => requestDispatchSolve(), kind: 'run', disabled: runBusy } } : undefined} />
 
       {/* An edit since the study makes the study's figures out of date too: the edited banner is their
           mark, and the headline's mixed-source line and chart then say so (review P1, GK B G1). */}

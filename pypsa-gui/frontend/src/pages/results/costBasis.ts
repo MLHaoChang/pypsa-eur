@@ -16,11 +16,13 @@ import type { FlowSection } from '../../api/flow'
 import { money } from '../../utils/money'
 import type { SimulationStatus } from '../../api/types'
 
-/** The run's figure in the status bar's notation (`money()`, a leading "−" when negative); null when
- *  there is none. The solve toast shows the same figure, so it reads it here too. */
+/** The run's figure in the status bar's notation (`money()`); signed, the minus before the symbol
+ *  ("-€ 16.3 m", ruling (ad), as `unitPrice`), and none on a figure that rounds to zero. null when there is
+ *  none. The solve toast shows the same figure, so it reads it here too. */
 export function objectiveFigure(v: number | null | undefined): string | null {
   if (v == null || !Number.isFinite(v)) return null
-  return `${v < 0 ? '−' : ''}${money(v, 'EUR')}`
+  const unsigned = money(v, 'EUR')
+  return v < 0 && /[1-9]/.test(unsigned) ? `-${unsigned}` : unsigned
 }
 
 type Basis = Pick<SimulationStatus, 'objective_basis' | 'objective_discounted_to'>

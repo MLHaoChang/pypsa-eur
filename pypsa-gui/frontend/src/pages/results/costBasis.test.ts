@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ObjectiveDecomposition } from '../../api/results'
 import {
-  gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
+  gridSupplyWords, objectiveFigure, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
 } from './costBasis'
 
 const m = (v: number) => `€${(v / 1e6).toFixed(1)} M`
@@ -111,5 +111,15 @@ describe('the grid supply note (Key capacities)', () => {
       .toBe('Grid supply is not listed: The connection limit is 0 MW: set one or choose another site type.')
     expect(gridSupplyWords({ state: 'complete' })).toMatch(/^Grid supply is not listed: what the site can import/)
     expect(gridSupplyWords(null)).toBeNull()
+  })
+})
+
+describe("the run's figure (status bar and toast)", () => {
+  it("is money()'s notation, signed with the minus before the symbol (ruling (ad))", () => {
+    expect(objectiveFigure(120_290_000)).toBe('€\u00a0120\u00a0m')
+    expect(objectiveFigure(-16_310_000)).toBe('-€\u00a016\u00a0m')
+    expect(objectiveFigure(-830_400)).toBe('-€\u00a0830\u00a0k')
+    expect(objectiveFigure(null)).toBeNull()
+    expect(objectiveFigure(Number.NaN)).toBeNull()
   })
 })
