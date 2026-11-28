@@ -1253,7 +1253,11 @@ export default function AppHeader() {
         const dot = queued || studying ? STATUS_DOT.running : (STATUS_DOT[status] ?? STATUS_DOT.idle)
         const label = queued
           ? `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
-          : studying ? STATUS_LABEL.running : (STATUS_LABEL[status] ?? 'Idle')
+          // The pill names the run in the words of the button that started it:
+          // "Run study" (Guided) or "Run LOPF" (Expert).
+          : studying ? 'Running study…'
+          : status === 'running' && (myJob == null || (myJob.kind ?? 'solve') === 'solve') ? 'Running LOPF…'
+          : (STATUS_LABEL[status] ?? 'Idle')
         return (
           <div className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border bg-bg-2">
             <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />

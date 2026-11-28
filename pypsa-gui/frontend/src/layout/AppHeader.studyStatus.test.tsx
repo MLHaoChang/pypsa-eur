@@ -60,10 +60,10 @@ beforeEach(() => {
 })
 
 describe('AppHeader status pill with a Guided study', () => {
-  it('reads "Running…" while the study runs, not "Idle"', () => {
+  it('reads "Running study…" while the study runs, not "Idle"', () => {
     projectRun = study
     renderHeader()
-    expect(screen.getByText('Running…')).toBeTruthy()
+    expect(screen.getByText('Running study…')).toBeTruthy()
     expect(screen.queryByText('Idle')).toBeNull()
   })
 
