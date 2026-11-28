@@ -39,13 +39,13 @@
   {
    "why": "about the key: a name in the user's message stays raw in the reply, others are replaced",
    "user": "what is e_nom?",
-   "text": "`e_nom` is the store's size in MWh; a line's size is its `s_nom`.",
-   "want": "`e_nom` is the store's size in MWh; a line's size is its Rating."
+   "text": "`e_nom` is the store's size in MWh; a load's size is its `p_set`.",
+   "want": "`e_nom` is the store's size in MWh; a load's size is its Demand."
   },
   {
    "why": "several tokens in one line",
    "text": "`e_nom`, `s_nom`, `p_set` and `marginal_cost` are set; `p_nom` is not.",
-   "want": "Energy capacity, Rating, Demand and Running cost are set; `p_nom` is not."
+   "want": "Energy capacity, `s_nom`, Demand and `marginal_cost` are set; `p_nom` is not."
   },
   {
    "why": "only single-backtick spans holding exactly one name",
@@ -117,6 +117,11 @@
      "why": "the opening fence line itself is never replaced",
      "text": "~~~ `e_nom`\n~~~",
      "want": "~~~ `e_nom`\n~~~"
+  },
+  {
+   "why": "the four names the Properties panel still labels differently stay raw until expert-catalogue slice 03 (UX 34)",
+   "text": "Set `marginal_cost`, `capital_cost`, `p_nom_max` and the line's `s_nom`; `e_nom` is replaced.",
+   "want": "Set `marginal_cost`, `capital_cost`, `p_nom_max` and the line's `s_nom`; Energy capacity is replaced."
   }
  ]
 }

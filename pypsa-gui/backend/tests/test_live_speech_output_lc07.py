@@ -503,10 +503,10 @@ def test_backticked_model_names_are_spoken_as_plain_names_but_the_caption_stays_
 
 def test_a_model_name_the_user_said_is_spoken_as_said(transport, monkeypatch):
     tid, sid, token, _, _ = _plain_spoken(
-        monkeypatch, '`e_nom` is the size; `s_nom` the rating.', said='what is e_nom?',
+        monkeypatch, '`e_nom` is the size; `p_set` the load.', said='what is e_nom?',
     )
     output = ls.claim_output(tid, token=token, session_id=sid)['output']
-    assert output['text'] == '`e_nom` is the size; Rating the rating.'
+    assert output['text'] == '`e_nom` is the size; Demand the load.'
 
 
 def test_the_tts_limit_is_checked_on_the_replaced_text(transport, monkeypatch):

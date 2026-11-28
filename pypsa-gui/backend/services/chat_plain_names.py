@@ -148,6 +148,13 @@ COLUMNS = {
 # guard (`catalogue/modelNameRule.ts`), same case table
 # (`tests/data/display_plain_names_cases.json`).
 
+# The Properties panel still shows `FieldSpec.label` for these, which is not the
+# catalogue's word (Line s_nom: "Capacity" there, "Rating" here), so chat keeps
+# them raw until expert-catalogue slice 03 moves the panel to the catalogue.
+# `tests/test_display_plain_names.py` fails once a name here no longer differs.
+# Mirrored in `frontend/src/catalogue/displayPlainNames.ts`.
+PANEL_NAMES_DIFFER = frozenset({"marginal_cost", "capital_cost", "p_nom_max", "s_nom"})
+
 _EDGE = r"(?<![A-Za-z0-9_])"
 _END = r"(?![A-Za-z0-9_])"
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
@@ -164,6 +171,8 @@ def _display_index() -> tuple[re.Pattern[str], dict[str, str | None]]:
         for key in by_name:
             word = lookup.plain_name(scope, key)
             words[key] = None if key in words and words[key] != word else word
+    for key in PANEL_NAMES_DIFFER:
+        words[key] = None
     snake = sorted((k for k in words if "_" in k), key=len, reverse=True)
     rule = re.compile(_EDGE + "(?:" + "|".join(map(re.escape, snake)) + ")" + _END)
     return rule, words

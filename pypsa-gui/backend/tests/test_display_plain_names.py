@@ -16,7 +16,7 @@ import pytest
 
 from services import chat_plain_names as P
 from services import live_speech as ls
-from services.asset_schema import lookup
+from services.asset_schema import fields, lookup
 from tests.test_live_speech_output_lc07 import (  # noqa: F401 — fixtures
     _checked_frames,
     _reset,
@@ -38,8 +38,27 @@ def test_case_table(case):
 
 def test_the_words_are_the_catalogue_lookup():
     assert P.display_plain_names("`e_nom`") == lookup.plain_name("Store", "e_nom")
-    assert P.display_plain_names("`s_nom`") == lookup.plain_name("Line", "s_nom")
     assert P.display_plain_names("`p_set`") == lookup.plain_name("Load", "p_set")
+
+
+_PANEL_CLASSES = {
+    "Generator": fields.GENERATOR, "StorageUnit": fields.STORAGE_UNIT, "Store": fields.STORE,
+    "Link": fields.LINK, "Line": fields.LINE, "Transformer": fields.TRANSFORMER,
+}
+
+
+@pytest.mark.parametrize("key", sorted(P.PANEL_NAMES_DIFFER))
+def test_a_name_chat_keeps_raw_still_differs_from_the_panel_label(key):
+    """Fails once the Properties panel shows the catalogue's word for `key` on every
+    class (expert-catalogue slice 03): then drop it from `PANEL_NAMES_DIFFER`, here
+    and in `displayPlainNames.ts`."""
+    differs = [
+        cls
+        for cls, specs in _PANEL_CLASSES.items()
+        for spec in specs
+        if spec.key == key and lookup.plain_name(cls, key) not in (None, spec.label)
+    ]
+    assert differs, f"{key}: the panel label equals the catalogue word on every class"
 
 
 SPOKEN = "Set `e_nom` to 200 MWh; `p_nom` stays."

@@ -24,6 +24,17 @@ import { snakeNameRule } from './modelNameRule'
 /** Class or settings scope → {model_name: plain name}. */
 export type ModelNameMap = Record<string, Record<string, string>>
 
+/** Names the Properties panel still labels differently (`FieldSpec.label`), so
+ *  chat keeps them raw until expert-catalogue slice 03 moves the panel to the
+ *  catalogue. Mirrored in `services/chat_plain_names.py`, which has the test
+ *  that fails once a label matches. */
+export const PANEL_NAMES_DIFFER: readonly string[] = [
+  'marginal_cost',
+  'capital_cost',
+  'p_nom_max',
+  's_nom',
+]
+
 interface NameIndex {
   rule: RegExp
   /** Model name → its one plain name, or null when classes disagree. */
@@ -37,6 +48,7 @@ function buildIndex(names: ModelNameMap): NameIndex {
       plain.set(key, plain.has(key) && plain.get(key) !== word ? null : word)
     }
   }
+  for (const key of PANEL_NAMES_DIFFER) plain.set(key, null)
   return { rule: snakeNameRule(plain.keys()), plain }
 }
 

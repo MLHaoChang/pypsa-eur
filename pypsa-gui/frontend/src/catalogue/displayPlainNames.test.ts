@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import table from '../../../backend/tests/data/display_plain_names_cases.json'
 import { assistantSpeech, plainTextForSpeech } from '../utils/speechOut'
-import { displayPlainNames, displayWord, plainNameOf, type ModelNameMap } from './displayPlainNames'
+import { displayPlainNames, displayWord, PANEL_NAMES_DIFFER, plainNameOf, type ModelNameMap } from './displayPlainNames'
 import generated from './modelNames.generated.json'
 import { snakeNameRule } from './modelNameRule'
 
@@ -43,7 +43,7 @@ describe('display replacement: the catalogue is the one word source', () => {
     for (const [key, words] of byKey) {
       const shown = displayPlainNames(`\`${key}\``)
       if (!rule.test(key)) expect(shown).toBe(`\`${key}\``)
-      else if (words.size > 1) expect(shown, key).toBe(`\`${key}\``)
+      else if (words.size > 1 || PANEL_NAMES_DIFFER.includes(key)) expect(shown, key).toBe(`\`${key}\``)
       else {
         expect(shown, key).toBe([...words][0])
         replaced++
@@ -54,10 +54,10 @@ describe('display replacement: the catalogue is the one word source', () => {
 
   it('reads the words the panel shows (spot checks against the catalogue file)', () => {
     expect(displayWord('e_nom')).toBe(plainNameOf('Store', 'e_nom'))
-    expect(displayWord('s_nom')).toBe(plainNameOf('Line', 's_nom'))
+    expect(displayWord('s_nom')).toBeNull() // the panel labels it differently until slice 03
     expect(displayWord('p_set')).toBe(plainNameOf('Load', 'p_set'))
-    expect([plainNameOf('Store', 'e_nom'), plainNameOf('Line', 's_nom'), plainNameOf('Load', 'p_set')])
-      .toEqual(['Energy capacity', 'Rating', 'Demand'])
+    expect([plainNameOf('Store', 'e_nom'), plainNameOf('Load', 'p_set')])
+      .toEqual(['Energy capacity', 'Demand'])
     expect(displayWord('p_nom')).toBeNull()
   })
 })

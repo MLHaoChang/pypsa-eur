@@ -26,7 +26,7 @@ const out = process.argv[2] || await fs.mkdtemp(path.join(os.tmpdir(), 'chat-pla
 const reply = [
   '`e_nom` is the store’s size in MWh. Next to it:',
   '',
-  '- `s_nom` and `p_set` read as the panel names them;',
+  '- `p_set` reads as the panel names it, and `marginal_cost` stays as written until the panel uses the catalogue word;',
   '- `p_nom` stays as written: a generator and a storage unit name it differently.',
   '',
   '> You wrote `e_nom` above.',
@@ -78,7 +78,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?theme=${theme}`)
     await page.getByText('What does e_nom mean?').waitFor()
     const shown = await page.locator('[data-role="assistant"]').innerText()
-    for (const want of ['Rating and Demand read', 'e_nom is the store']) {
+    for (const want of ['Demand reads', 'e_nom is the store']) {
       if (!shown.includes(want)) throw new Error(`reply lacks "${want}": ${shown}`)
     }
     await page.waitForTimeout(400)
