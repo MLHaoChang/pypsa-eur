@@ -390,3 +390,14 @@ def test_the_unknown_row_keeps_the_screen_note(drafted):
     )
     (unknown,) = _with_bg(emission)
     assert unknown["note"].endswith(plant["note"])
+
+
+def test_a_record_that_is_not_an_object_reads_unreadable(drafted):
+    _put(drafted)
+    (ce.campus_dir(drafted) / ce.BACKGROUND_DIR / ce.BACKGROUND_META).write_text("[]")
+    with pytest.raises(HTTPException) as e:
+        ce.get_background(drafted)
+    assert (
+        e.value.status_code == 409
+        and e.value.detail["error_kind"] == "campus_background_unreadable"
+    )
