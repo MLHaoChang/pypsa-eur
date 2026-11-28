@@ -141,6 +141,7 @@ def test_a_bundle_with_values_not_carried_says_how_many(island_run):
                 **m,
                 "not_written": [
                     {"pp_name": None, "dgs_name": "shunt_3", "attribute": "p_mw"},
+                    {"pp_name": "BESS", "reason": "no verified attribute"},
                     {"attribute": "q_mvar"},
                 ],
             }
@@ -149,7 +150,11 @@ def test_a_bundle_with_values_not_carried_says_how_many(island_run):
     b = next(
         b for b in ce.powerfactory_bundles(project)["bundles"] if b["name"] == name
     )
-    assert [i["element"] for i in b["not_written_items"]] == ["shunt_3", ""]
+    assert b["not_written_items"] == [
+        {"element": "shunt_3", "attribute": "p_mw", "reason": ""},
+        {"element": "BESS", "attribute": "", "reason": "no verified attribute"},
+        {"element": "", "attribute": "q_mvar", "reason": ""},
+    ]  # a missing field reads empty, never "None"
     for text in (
         "{not json",
         json.dumps([m]),
