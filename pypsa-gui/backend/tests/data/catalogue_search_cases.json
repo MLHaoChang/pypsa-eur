@@ -211,6 +211,44 @@
    "short_help": "",
    "guide": null,
    "former_ids": []
+  },
+  {
+   "id": "generator.zork",
+   "scope": "Generator",
+   "model_name": "zork_m",
+   "plain_name": "Zork",
+   "depth": "detail",
+   "functions": {},
+   "aliases": [
+    "quux changer"
+   ],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.zork_limit",
+   "scope": "Generator",
+   "model_name": "zork_limit_m",
+   "plain_name": "Zork limit",
+   "depth": "essentials",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
+  },
+  {
+   "id": "generator.quux",
+   "scope": "Generator",
+   "model_name": "quux_m",
+   "plain_name": "Quux changer limit",
+   "depth": "essentials",
+   "functions": {},
+   "aliases": [],
+   "short_help": "",
+   "guide": null,
+   "former_ids": []
   }
  ],
  "search": [
@@ -331,6 +369,48 @@
    ],
    "asset_type": "bess",
    "why": "the asset type's classes only"
+  },
+  {
+   "query": "Zork",
+   "ids": [
+    "generator.zork",
+    "generator.zork_limit"
+   ],
+   "why": "an exact plain name outranks a word prefix of a shallower entry"
+  },
+  {
+   "query": "quux changer",
+   "ids": [
+    "generator.zork",
+    "generator.quux"
+   ],
+   "why": "an exact alias outranks a word prefix of a shallower entry"
+  },
+  {
+   "query": "rated",
+   "ids": [
+    "generator.capacity"
+   ],
+   "why": "a word prefix of an alias"
+  },
+  {
+   "query": "nit can",
+   "ids": [
+    "generator.capacity"
+   ],
+   "why": "text inside the short help, not at a word start"
+  },
+  {
+   "query": "produce unit",
+   "ids": [
+    "generator.capacity"
+   ],
+   "why": "every word starts a short-help word, in any order"
+  },
+  {
+   "query": "-",
+   "ids": [],
+   "why": "a query with no words matches nothing"
   }
  ],
  "resolve": [

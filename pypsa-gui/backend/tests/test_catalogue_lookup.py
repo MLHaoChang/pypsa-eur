@@ -85,3 +85,23 @@ def test_the_asset_type_matcher_follows_the_frontend(case):
     if case["backend"] != case["frontend"]:
         # Only the site-membership port rule, which the server does not apply, may split them.
         assert "port" in case["why"]
+
+
+def test_guide_text_is_searched_without_its_markdown():
+    text = lookup._plain_text(
+        "See [the tap ratio](guide/tap.md).\n```py\nhidden_code = 1\n```\n## **Bold** | cell > quote"
+    )
+    assert "the tap ratio" in text and "guide/tap" not in text
+    assert "hidden_code" not in text
+    assert not set(text) & set("#*_`>|")
+
+
+def test_asset_types_of_lists_a_class_s_placeable_types_only(monkeypatch):
+    import dataclasses
+
+    gen = next(t for t in lookup.ASSET_TYPES if "Generator" in t.components)
+    bus = next(t for t in lookup.ASSET_TYPES if "Generator" not in t.components)
+    hidden = dataclasses.replace(gen, id="hiddenGen", internal=True)
+    hidden_bus = dataclasses.replace(bus, id="hiddenBus", internal=True)
+    monkeypatch.setattr(lookup, "ASSET_TYPES", (gen, hidden, bus, hidden_bus))
+    assert lookup.asset_types_of("Generator") == [gen.id]

@@ -262,6 +262,37 @@
    },
    "backend": "manifold",
    "frontend": "manifold"
+  },
+  {
+   "why": "a gas link with no bus2 is not a CHP",
+   "cls": "Link",
+   "row": {
+    "name": "c",
+    "carrier": "gas",
+    "bus0": "B1",
+    "bus1": "B1"
+   },
+   "buses": {
+    "B1": "AC"
+   },
+   "backend": "feeder",
+   "frontend": "feeder"
+  },
+  {
+   "why": "a gas link with a bus2 is a CHP",
+   "cls": "Link",
+   "row": {
+    "name": "c",
+    "carrier": "gas",
+    "bus0": "B1",
+    "bus1": "B1",
+    "bus2": "B1"
+   },
+   "buses": {
+    "B1": "AC"
+   },
+   "backend": "chp",
+   "frontend": "chp"
   }
  ]
 }
