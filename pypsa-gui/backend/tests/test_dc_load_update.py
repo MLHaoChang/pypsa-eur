@@ -245,3 +245,107 @@ def test_a_study_on_the_projects_own_context_refuses(
     )
     assert r.status_code == 409
     assert _loads(ctx).equals(before) and _marker(client, name) == marker
+
+
+# ── the service on its own: refusals and the all-or-nothing paths ──────────
+
+
+class _Tpl:
+    """The real templates module, with the profile writer replaceable."""
+
+    def __init__(self, real, apply=None):
+        self._real, self._apply = real, apply
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def apply_dc_profile_to_network(self, n, tid, spec, planning=None):
+        if self._apply is None:
+            return None  # the series stay as they are: they match the spec
+        return self._apply(n, tid, spec, planning)
+
+
+def _stub_network(columns=("it_load", "cooling")):
+    import pandas as pd
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        loads_t=SimpleNamespace(p_set=pd.DataFrame({c: [1.0, 2.0] for c in columns}))
+    )
+
+
+def _service(client, tmp_path, monkeypatch, project_row, name):
+    from routers.campus_electrical import _eh_templates
+    from services import project_registry
+
+    _make(client, tmp_path, monkeypatch, "eh_datacenter", name)
+    return project_registry.project_dir(project_row(name)), _eh_templates()
+
+
+def test_the_service_refuses_what_it_cannot_apply(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx
+):
+    from services.dc_load_update import DcLoadUpdateError, update_dc_load
+
+    d, tpl = _service(client, tmp_path, monkeypatch, project_row, "dc_svc")
+    with pytest.raises(DcLoadUpdateError) as exc:
+        update_dc_load(d, tpl, {"backup": "x"})
+    assert exc.value.field == "dc_load.backup"
+    with pytest.raises(DcLoadUpdateError):
+        update_dc_load(d, tpl, {"backup": {"mode": "diesel"}})
+    for columns in (("cooling",), ("it_load",)):
+        with pytest.raises(DcLoadUpdateError) as exc:
+            update_dc_load(d, tpl, {"pue_at_design": 1.5}, _stub_network(columns))
+        assert exc.value.kind == "project_not_open"
+    # a project that is not a data centre has no spec to change
+    other = tmp_path / "plain"
+    other.mkdir()
+    with pytest.raises(DcLoadUpdateError):
+        update_dc_load(other, tpl, {"pue_at_design": 1.5})
+
+
+def test_a_failed_series_write_puts_the_series_back(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx
+):
+    from services.dc_load_update import update_dc_load
+
+    d, real = _service(client, tmp_path, monkeypatch, project_row, "dc_rb1")
+    n = _stub_network()
+    before = n.loads_t.p_set.copy()
+
+    def half_write(net, tid, spec, planning):
+        net.loads_t.p_set[["it_load", "cooling"]] = 99.0
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        update_dc_load(d, _Tpl(real, half_write), {"pue_at_design": 1.5}, n)
+    assert n.loads_t.p_set.equals(before)
+
+
+def test_a_failed_marker_write_puts_the_series_back(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx
+):
+    from services.adequacy import dc_backup
+    from services.dc_load_update import update_dc_load
+
+    d, real = _service(client, tmp_path, monkeypatch, project_row, "dc_rb2")
+    n = _stub_network()
+    before = n.loads_t.p_set.copy()
+    calls = []
+
+    def write(net, tid, spec, planning):
+        calls.append(1)
+        if len(calls) > 1:  # the first call is the "was it edited" check
+            net.loads_t.p_set[["it_load", "cooling"]] = 99.0
+
+    def broken(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(dc_backup, "_write_meta", broken)
+    with pytest.raises(OSError):
+        update_dc_load(d, _Tpl(real, write), {"pue_at_design": 1.5}, n)
+    assert len(calls) == 2 and n.loads_t.p_set.equals(before)
+    # a marker-only failure leaves no series to restore and still raises
+    with pytest.raises(OSError):
+        update_dc_load(d, _Tpl(real, write), {"architecture": "dc_800v"}, n)
+    assert n.loads_t.p_set.equals(before)
