@@ -3,7 +3,7 @@
 
 # Verdict text points to 'step 3 (Goal)'; every template opens with a warning
 
-Status: ready-for-agent; audit 2026-11-25: #1611, #1695 merged (stale step numbers fixed); left: em dashes (SiteTypeSelect.tsx:12,14), amber first screen (needs template-e2e 01)
+Status: done (2026-11-28, PR claude/ux-walkthrough-05-colons): stale step numbers fixed in #1611/#1695; em dashes in SiteTypeSelect.tsx replaced by colons. The amber first screen stays by design: the staged hub templates (eh_h2_hub_staged, eh_h2_hub) carry no site location, so "The site has no location" is true and template-e2e 01 gates Run on it. Not checked in the running app (API and Vite were not running in this session): whether Island Microgrid still opens on section 3.
 Model tier: sonnet
 Size: S
 Blocked by: #1611 merged (it rewrites the Guided verdict text)
