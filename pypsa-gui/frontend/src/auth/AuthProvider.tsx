@@ -143,3 +143,8 @@ export function useAuth(): AuthContextValue {
 export function useAuthUserId(): string | null {
   return useContext(AuthContext)?.user?.id ?? null
 }
+
+/** The signed-in user's email, or null as `useAuthUserId` (07g: whose report comments are theirs). */
+export function useAuthUserEmail(): string | null {
+  return useContext(AuthContext)?.user?.email ?? null
+}

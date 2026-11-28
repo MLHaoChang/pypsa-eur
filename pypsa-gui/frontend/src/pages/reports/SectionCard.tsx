@@ -24,7 +24,7 @@
 // hands an EMPTY instruction to the viewer so the backend uses the pending
 // one; the section's `comments` are listed under the header.
 import { useId, useMemo, useState, type FormEvent } from 'react'
-import { AlertTriangle, CircleSlash, Info, MessageSquare, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CircleSlash, Info, MessageSquare, MessageSquarePlus, RefreshCw } from 'lucide-react'
 import type { Options } from 'react-markdown'
 import ChatMarkdown from '../../components/ChatMarkdown'
 import { Tag } from '../../components/PageKit'
@@ -38,6 +38,7 @@ import {
   type SectionStatus,
 } from '../../api/reports'
 import { rehypeMarkUnverified } from './highlightUnverified'
+import { commentableParts, SectionComments, type CommentingProps } from './SectionComments'
 
 const STATUS_LABEL: Record<SectionStatus, string> = {
   ok: 'ok',
@@ -193,11 +194,13 @@ function BlockView({
 }
 
 export function SectionCard({
-  section, doc, project, onRegenerate, regenerateDisabled,
+  section, doc, project, onRegenerate, regenerateDisabled, commenting,
 }: {
   section: Section
   doc: ReportDocument
   project: string
+  /** 07g: the report comments (07c) on this section, and posting new ones. */
+  commenting?: CommentingProps
   /** WP7b: present when the viewer can regenerate sections. */
   onRegenerate?: (sectionId: string, instruction: string) => void | Promise<unknown>
   regenerateDisabled?: boolean
@@ -209,6 +212,9 @@ export function SectionCard({
   const [regenOpen, setRegenOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [commentOpen, setCommentOpen] = useState(false)
+  const parts = useMemo(() => commentableParts(section, doc), [section, doc])
+  const offerComment = !!commenting?.canComment && parts.length > 0
 
   async function submitRegenerate(e: FormEvent) {
     e.preventDefault()
@@ -250,6 +256,18 @@ export function SectionCard({
             {unverified.length} number{unverified.length === 1 ? '' : 's'} not found in the evidence
           </span>
         )}
+        {offerComment && (
+          <button
+            type="button"
+            onClick={() => setCommentOpen(o => !o)}
+            data-testid="section-comment"
+            aria-expanded={commentOpen}
+            title="Comment on a paragraph, bullet list or table of this section"
+            className={`${unverified.length > 0 ? '' : 'ml-auto '}inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent`}
+          >
+            <MessageSquarePlus size={10} /> Comment…
+          </button>
+        )}
         {onRegenerate && (
           <button
             type="button"
@@ -260,7 +278,7 @@ export function SectionCard({
             title={regenerateDisabled
               ? 'A report job is running'
               : 'Write this section again, with an optional instruction, as a new version'}
-            className={`${unverified.length > 0 ? '' : 'ml-auto '}inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed`}
+            className={`${unverified.length > 0 || offerComment ? '' : 'ml-auto '}inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             <RefreshCw size={10} /> Regenerate…
           </button>
@@ -331,6 +349,16 @@ export function SectionCard({
         >
           {comments.map((c, i) => <li key={i}>{c}</li>)}
         </ul>
+      )}
+      {commenting && (
+        <SectionComments
+          {...commenting}
+          section={section}
+          doc={doc}
+          parts={parts}
+          formOpen={offerComment && commentOpen}
+          onCloseForm={() => setCommentOpen(false)}
+        />
       )}
       <div className="p-4 flex flex-col gap-2.5">
         {section.status !== 'ok' && section.note && (

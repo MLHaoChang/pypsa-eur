@@ -1184,9 +1184,36 @@ def test_a_comment_at_the_latest_digest_is_stored(pdir):
     assert [k.comment_id for k in R.load_comments(pdir, RID)] == [c.comment_id]
 
 
-def test_a_comment_at_an_older_digest_is_refused_and_not_stored(pdir):
+def _report_files(pdir) -> dict[str, bytes]:
+    root = pdir / "reports" / RID
+    return {str(f.relative_to(root)): f.read_bytes() for f in sorted(root.rglob("*")) if f.is_file()}
+
+
+def test_a_comment_at_an_older_digest_is_refused_and_writes_nothing(pdir):
+    R.add_comment(pdir, RID, "first", _anchor())
+    before = _report_files(pdir)
+    assert "comments.json" in before
     e = _refused(lambda: R.add_comment(pdir, RID, "x", _anchor(), base_digest="0" * 64))
     assert (e.kind, e.status) == ("revision_stale_base", 409)
+    # The comments file, every version and the meta are byte-equal (GK B, 07g).
+    assert _report_files(pdir) == before
+
+
+def test_the_digest_check_is_made_under_the_report_lock(pdir, monkeypatch):
+    """A version saved between the caller's read and the lock still refuses:
+    the digest is read inside `store.report_lock`, not before it."""
+    seen = _digest(pdir)
+    real_lock = store.report_lock
+
+    def lock_then_revise(project_dir, report_id):
+        monkeypatch.setattr(store, "report_lock", real_lock)
+        doc = store.load_report(project_dir, report_id)
+        store.save_version(project_dir, doc.model_copy(update={"title": "v2"}))
+        return real_lock(project_dir, report_id)
+
+    monkeypatch.setattr(store, "report_lock", lock_then_revise)
+    e = _refused(lambda: R.add_comment(pdir, RID, "x", _anchor(), base_digest=seen))
+    assert e.kind == "revision_stale_base"
     assert R.load_comments(pdir, RID) == []
 
 
