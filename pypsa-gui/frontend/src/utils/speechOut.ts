@@ -46,13 +46,6 @@ export function isSpeechOutAvailable(): boolean {
   return synth() !== null
 }
 
-/**
- * Markdown → something worth hearing.
- *
- * Deliberately a reduction, not a conversion: code blocks and tables are
- * REPLACED by a mention of themselves rather than read out. Someone who wants
- * the table can look at it — it is on screen, four inches from their ear.
- */
 /** An assistant reply as spoken: the plain names the chat shows for its
  *  backticked model names (expert-catalogue spec §7.3), then the reduction
  *  below. `userText`: the user's message the reply answers. */
@@ -60,6 +53,13 @@ export function assistantSpeech(reply: string, userText?: string): string {
   return plainTextForSpeech(displayPlainNames(reply, { userText }))
 }
 
+/**
+ * Markdown → something worth hearing.
+ *
+ * Deliberately a reduction, not a conversion: code blocks and tables are
+ * REPLACED by a mention of themselves rather than read out. Someone who wants
+ * the table can look at it — it is on screen, four inches from their ear.
+ */
 export function plainTextForSpeech(markdown: string): string {
   let t = markdown ?? ''
 
