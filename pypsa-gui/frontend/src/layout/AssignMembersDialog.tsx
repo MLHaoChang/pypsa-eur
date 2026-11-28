@@ -13,6 +13,9 @@ interface Props {
   projectId: string
   // Human-friendly label for the header (usually the same as projectId).
   projectLabel?: string
+  // Who owns the project (the creator has no membership row, so the members
+  // list does not name them).
+  ownerEmail?: string | null
   onClose: () => void
 }
 
@@ -23,7 +26,7 @@ interface Props {
 // directory is already scoped to the caller's own organization server-side.
 // If the save is refused (a non-owner / non-admin), the backend returns 403
 // and we surface that as a toast rather than dead-ending the dialog.
-export default function AssignMembersDialog({ projectId, projectLabel, onClose }: Props) {
+export default function AssignMembersDialog({ projectId, projectLabel, ownerEmail, onClose }: Props) {
   const qc = useQueryClient()
   const { user } = useAuth()
   const titleId = useId()
@@ -52,13 +55,19 @@ export default function AssignMembersDialog({ projectId, projectLabel, onClose }
   const [confirming, setConfirming] = useState(false)
   const [discarding, setDiscarding] = useState(false)
 
+  // Owner and org admins edit whatever a row says: they are shown as plain
+  // text and never sent as members.
+  const fixedIds = useMemo(() => {
+    const ids = new Set((membersQuery.data ?? []).filter(m => m.role_fixed).map(m => m.user_id))
+    for (const u of usersQuery.data ?? []) {
+      if (u.role === 'admin' || (ownerEmail && u.email === ownerEmail)) ids.add(u.id)
+    }
+    return ids
+  }, [membersQuery.data, usersQuery.data, ownerEmail])
   const currentRoles = useMemo(
-    () => new Map((membersQuery.data ?? []).map(m => [m.user_id, m.role] as [string, Role])),
-    [membersQuery.data],
-  )
-  const fixedIds = useMemo(
-    () => new Set((membersQuery.data ?? []).filter(m => m.role_fixed).map(m => m.user_id)),
-    [membersQuery.data],
+    () => new Map((membersQuery.data ?? []).filter(m => !fixedIds.has(m.user_id))
+      .map(m => [m.user_id, m.role] as [string, Role])),
+    [membersQuery.data, fixedIds],
   )
 
   // Candidate users — the org-member directory is already scoped to the
@@ -96,11 +105,9 @@ export default function AssignMembersDialog({ projectId, projectLabel, onClose }
     const me = user?.id
     const meLoses = !!me && currentRoles.get(me) === 'editor' && !fixedIds.has(me)
       && roles.get(me) !== 'editor'
-    const editors = [...roles].filter(([id, r]) => r === 'editor' || fixedIds.has(id)).length
-    return meLoses || editors === 0
+    return meLoses
   }, [user?.id, currentRoles, fixedIds, roles])
 
-  const owner = (membersQuery.data ?? []).find(m => m.role_fixed && candidates.find(c => c.id === m.user_id)?.role !== 'admin')
   const requestClose = () => { if (dirty && !discarding) setDiscarding(true); else onClose() }
 
   const saveMut = useMutation({
@@ -141,7 +148,7 @@ export default function AssignMembersDialog({ projectId, projectLabel, onClose }
           </div>
           <div className="text-[10px] text-muted mt-0.5">
             People you add can open every scenario in this project's tree. Viewers cannot change anything.
-            {owner?.email && <> Owner: {owner.email}.</>}
+            {ownerEmail && <> Owner: {ownerEmail}.</>}
           </div>
         </div>
         <button
@@ -230,7 +237,7 @@ export default function AssignMembersDialog({ projectId, projectLabel, onClose }
             {discarding
               ? 'Discard your changes?'
               : confirming
-                ? 'This leaves you or the project without edit access. Save anyway?'
+                ? 'This takes away your own edit access. Save anyway?'
                 : 'No changes to save.'}
           </div>
         )}

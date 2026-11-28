@@ -8,6 +8,7 @@ import AssignMembersDialog from './AssignMembersDialog'
 // (Workspace panel) alike. Shows only to people who may manage membership.
 export default function ShareButton({ projectId, className = '' }: { projectId: string; className?: string }) {
   const canManage = useUIStore(s => s.canManageMembers)
+  const ownerEmail = useUIStore(s => s.ownerEmail)
   const [open, setOpen] = useState(false)
   if (!authEnabled || !canManage) return null
   return (
@@ -20,7 +21,7 @@ export default function ShareButton({ projectId, className = '' }: { projectId: 
       >
         <Users size={12} /> Share
       </button>
-      {open && <AssignMembersDialog projectId={projectId} onClose={() => setOpen(false)} />}
+      {open && <AssignMembersDialog projectId={projectId} ownerEmail={ownerEmail} onClose={() => setOpen(false)} />}
     </>
   )
 }
