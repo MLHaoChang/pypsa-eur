@@ -284,7 +284,7 @@ def _refused(project, status, kind, field, **kw):
 def test_the_size_cap_is_named_and_refused_with_413(drafted):
     pad = b"x" * (1024 * 1024 - len(CSV) + 1)  # the literal cap: 1 MiB
     msg = _refused(drafted, 413, "campus_background_too_large", "file", data=CSV + pad)
-    assert msg == "File: larger than 1 MB"
+    assert msg == "File: larger than 1 MiB"
 
 
 @pytest.mark.parametrize(

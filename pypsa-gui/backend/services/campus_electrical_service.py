@@ -2899,7 +2899,7 @@ def put_background(project, data: bytes, source: str, measured_on: str, filename
     if len(data) > MAX_BACKGROUND_BYTES:
         raise HTTPException(status_code=413, detail={
             "error_kind": "campus_background_too_large",
-            "message": f"File: larger than {MAX_BACKGROUND_BYTES // (1024 * 1024)} MB",
+            "message": f"File: larger than {MAX_BACKGROUND_BYTES // (1024 * 1024)} MiB",
             "field": "file",
         })
     source = (source or "").strip()

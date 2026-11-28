@@ -27,6 +27,7 @@ import { blockerMessage } from '../../utils/blockerMessage'
 import { nk } from '../../utils/queryKeys'
 import { useFlowScope } from '../flowScope/useFlowScope'
 import { fmt, useGridReadiness } from './GridReadinessScorecard'
+import BackgroundHarmonicsRow from './BackgroundHarmonicsRow'
 import { ENERGIZED_SENTENCE, EnergizationRows } from './EnergizationRows'
 
 const SHOWN: Record<string, string> = {
@@ -371,6 +372,7 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
               })}
             </ul>
           )}
+      {!only && <ul className="mt-3 flex flex-col gap-3"><BackgroundHarmonicsRow /></ul>}
     </PageSection>
   )
 }
