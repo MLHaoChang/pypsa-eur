@@ -279,6 +279,7 @@ GET     /api/projects/{name}/eh_template                                        
 GET     /api/projects/{name}/flow                                                  -> get_project_flow_api_projects__name__flow_get
 POST    /api/projects/{name}/flow/ack                                              -> ack_flow_item_api_projects__name__flow_ack_post
 GET     /api/projects/{name}/flow/reliability_goal                                 -> get_reliability_goal_api_projects__name__flow_reliability_goal_get
+PUT     /api/projects/{name}/flow/energization                                     -> put_flow_energization_api_projects__name__flow_energization_put
 GET     /api/projects/{name}/flow/scope                                            -> get_flow_scope_api_projects__name__flow_scope_get
 PUT     /api/projects/{name}/flow/scope                                            -> put_flow_scope_api_projects__name__flow_scope_put
 GET     /api/projects/{name}/layout                                                -> get_layout_api_projects__name__layout_get

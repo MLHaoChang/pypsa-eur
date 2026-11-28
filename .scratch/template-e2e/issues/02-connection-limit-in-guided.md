@@ -3,7 +3,7 @@
 
 # 02 — The connection limit cannot be changed in Guided; "Import efficiency" opens an empty Link form
 
-Status: ready-for-agent; audit 2026-11-25: #1626, #1773, #1778 merged (Guided field, per-period drawer, energization check); left: chat parity for energization_per_period (declared unbuilt in not_via_chat)
+Status: done (#1626, #1773, #1778; chat parity for energization_per_period: set_energization_period, claude/template-e2e-02c-energization-chat)
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk
 Size: S
 Gated: UX
@@ -201,3 +201,4 @@ Each condition is quoted verbatim from the gatekeepers' messages (GK B 65 sessio
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.
+- 2026-11-28: chat parity built: `set_energization_period` (fragment pair `harness/catalogue_tools/energization.py` + `services/chat_dispatchers/energization.py`) calls `routers.flow.put_flow_energization` in-process through `_route`, so it shares the route's validation, lock, refusals and write rules; a viewer is refused at dispatch (`project_view_only`). The not_via_chat entry is removed; its held-by-spec route-parity limitation is deleted (route parity refuses a limitation held by a done issue). Tests: `tests/test_energization_chat_tool.py`.
