@@ -63,6 +63,113 @@ _VOLL_LOAD_PREMIUM: contextvars.ContextVar[dict[str, float]] = (
     contextvars.ContextVar("voll_load_premium", default={}))
 
 
+#: `n.meta` key of the period weights the last solve's LP was priced with (template-e2e 18):
+#: ``{"ref_year", "real_rate", "factors": {"<period>": PV × years}}`` when the auto period
+#: discount was applied, None when it was not (off, single-period, or its setup failed).
+#: Absent on a network solved before the stamp. JSON scalars only: it is saved with the project.
+SOLVE_DISCOUNT_META = "pypsa_gui_solve_discount"
+#: `n.meta` key of the strategy the last solve ran ("full", "myopic", "rolling").
+SOLVE_STRATEGY_META = "pypsa_gui_solve_strategy"
+#: What `solve_discount` returns for a network solved before the stamp.
+UNKNOWN = "unknown"
+
+
+def solve_discount(n) -> dict | str | None:
+    """The period weights the last solve applied, read back from its stamp.
+
+    ``{"ref_year", "real_rate", "factors": {period: weight}}``; None when the solve applied
+    no discount; ``"unknown"`` when the network carries no stamp (solved before it, or a
+    malformed one). Never recomputed from today's config: the rate or the toggle may have
+    changed since the solve.
+    """
+    meta = getattr(n, "meta", None) or {}
+    if SOLVE_DISCOUNT_META not in meta:
+        return UNKNOWN
+    raw = meta[SOLVE_DISCOUNT_META]
+    if raw is None:
+        return None
+    try:
+        return {"ref_year": int(raw["ref_year"]), "real_rate": float(raw["real_rate"]),
+                "factors": {int(p): float(f) for p, f in raw["factors"].items()}}
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return UNKNOWN
+
+
+#: `captured` key of the basis a solve is priced on, until `commit_solve_basis` stamps it.
+SOLVE_BASIS_CAPTURED = "solve_basis"
+
+
+def dispatched_strategy(cfg, *, sclopf: bool) -> str:
+    """The strategy `run_simulation` dispatches for ``cfg`` (the one decision it and the stamp share).
+
+    Myopic needs multi-investment periods; rolling needs neither multi-investment periods
+    nor SCLOPF (PyPSA's rolling horizon has no period weightings, and myopic subsumes
+    SCLOPF). Every other combination runs the full horizon.
+    """
+    asked = getattr(cfg, "solve_strategy", "full")
+    multi = bool(getattr(cfg, "multi_investment_periods", False))
+    if asked == "myopic" and multi:
+        return "myopic"
+    if asked == "rolling" and not multi and not sclopf:
+        return "rolling"
+    return "full"
+
+
+def commit_solve_basis(n, captured: dict) -> None:
+    """Stamp the basis held in ``captured`` on ``n``, only after a successful solve: a failed
+    one leaves the previous solve's results, so it leaves their stamp as well."""
+    basis = captured.get(SOLVE_BASIS_CAPTURED)
+    if basis is None:
+        return
+    n.meta[SOLVE_DISCOUNT_META] = basis["discount"]
+    n.meta[SOLVE_STRATEGY_META] = basis["strategy"]
+
+
+def solve_strategy(n) -> str | None:
+    """The strategy the last solve ran, from its stamp; None when not stamped."""
+    v = (getattr(n, "meta", None) or {}).get(SOLVE_STRATEGY_META)
+    return v if v in ("full", "myopic", "rolling") else None
+
+
+def auto_discount_factors(n, cfg) -> dict | None:
+    """The per-period objective weights `auto_discount_periods` gives the LP.
+
+    ``{"ref_year", "real_rate", "factors": {period: PV × years}}``, or None when
+    the option does not apply (off, single-period, or flat snapshots). The solve
+    writes these into ``investment_period_weightings.objective`` for the LP only
+    and restores the network's own weights afterwards, so a reader reconciling
+    ``n.objective`` (template-e2e 18) prices the LP side with this, not with the
+    restored weights.
+
+    The real discount rate is the Fisher relation of the nominal ``discount_rate``
+    and ``inflation_rate`` (the LP's costs are real €): real_r = (1 + nominal) /
+    (1 + inflation) − 1, clamped at −0.999 so (1 + r) stays positive. The PV is
+    taken at the period's start and multiplied by the period's span in years
+    (exact enough for r ≪ 1 and short periods; the exact form is a geometric
+    series). Reference year: the first active period.
+    """
+    if not (
+        getattr(cfg, "auto_discount_periods", False)
+        and getattr(cfg, "multi_investment_periods", False)
+        and isinstance(n.snapshots, pd.MultiIndex)
+        and len(n.investment_periods) > 0
+    ):
+        return None
+    periods_active = sorted(int(p) for p in n.investment_periods)
+    ref_year = periods_active[0]
+    r_nom = float(cfg.discount_rate or 0.0)
+    infl = float(getattr(cfg, "inflation_rate", 0.0) or 0.0)
+    r = (1.0 + r_nom) / (1.0 + infl) - 1.0 if 1.0 + infl > 0 else r_nom
+    if r <= -0.999:
+        r = -0.999
+    ipw = n.investment_period_weightings
+    factors: dict[int, float] = {}
+    for p in periods_active:
+        yrs = float(ipw.at[p, "years"]) if "years" in ipw.columns else 1.0
+        factors[p] = (1.0 + r) ** -(p - ref_year) * yrs
+    return {"ref_year": ref_year, "real_rate": r, "factors": factors}
+
+
 def current_voll_load_premium() -> dict[str, float]:
     """Load id → VOLL multiplier in force for the current solve ({} = none)."""
     return dict(_VOLL_LOAD_PREMIUM.get())
@@ -603,7 +710,7 @@ def _run_undo_actions(n, undo_actions: list, phase) -> None:
         pass
 
 
-def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
+def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase, *, sclopf: bool | None = None):
     """
     Apply the five transient modelling knobs and return a `(restore, captured)`
     pair. Caller MUST invoke restore() in a finally block, regardless of
@@ -899,57 +1006,46 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         #     period as equally weighted — so the LP front-loads all CAPEX into
         #     the first period (cheaper amortisation, identical OPEX savings).
         #     Reference year = first period in the active list. Multi-period only.
-        if (
-            cfg.auto_discount_periods
-            and cfg.multi_investment_periods
-            and isinstance(n.snapshots, pd.MultiIndex)
-            and len(n.investment_periods) > 0
-        ):
-            try:
-                periods_active = sorted(int(p) for p in n.investment_periods)
-                ref_year = periods_active[0]
+        #     The weights applied are stamped on the network (`SOLVE_DISCOUNT_META`, from the
+        #     same dict written into ipw) for readers that reconcile `n.objective` after the
+        #     weights are restored (template-e2e 18): null unless they were applied. The
+        #     strategy dispatched is stamped beside it, so the pair always describes one solve.
+        #     Held in `captured` until the solve succeeds (`commit_solve_basis`). ``sclopf`` is
+        #     the caller's resolved SCLOPF flag (None: the config's).
+        if sclopf is None:
+            sclopf = bool(getattr(cfg, "sclopf", False))
+        basis = {"discount": None, "strategy": dispatched_strategy(cfg, sclopf=sclopf)}
+        captured[SOLVE_BASIS_CAPTURED] = basis
+        try:
+            disc = auto_discount_factors(n, cfg)
+            if disc is not None:
+                periods_active = sorted(disc["factors"])
                 r_nom = float(cfg.discount_rate or 0.0)
                 infl = float(getattr(cfg, "inflation_rate", 0.0) or 0.0)
-                # Real discount rate used in the cross-period PV factor. When the
-                # user enters a NOMINAL discount (e.g. WACC = 7 %) and a separate
-                # inflation rate (e.g. 2 %), the real discount that matters for
-                # discounting REAL-€ LP costs is roughly nominal − inflation.
-                # Use the exact Fisher relation so the formula is right even at
-                # higher inflations: real_r = (1 + nominal) / (1 + inflation) − 1.
-                # Guard against pathological inflation > nominal (real_r would
-                # go negative — mathematically valid but rarely intended): clamp
-                # at -0.999 so (1 + r) stays positive in the PV exponentiation.
-                if 1.0 + infl > 0:
-                    r = (1.0 + r_nom) / (1.0 + infl) - 1.0
-                else:
-                    r = r_nom
-                if r <= -0.999:
-                    r = -0.999
+                r = disc["real_rate"]
                 ipw = n.investment_period_weightings
                 original_obj = ipw["objective"].copy()
-                new_factors: dict[int, float] = {}
+
+                def _restore_ipw_objective(orig=original_obj):
+                    for p in orig.index:
+                        n.investment_period_weightings.at[p, "objective"] = float(orig.at[p])
+
+                # Registered before the first write, so a failure part-way still restores.
+                undo_actions.append(("call", _restore_ipw_objective))
                 for p in periods_active:
-                    # Per-period span (years_in_period). PyPSA defaults to gap-to-next
-                    # so multi-year periods get correctly weighted. PV applied at
-                    # period start; the within-period sum is approximated by
-                    # PV(start) × years (sufficient for r ≪ 1 and short periods —
-                    # exact would compute the geometric series).
-                    yrs = float(ipw.at[p, "years"]) if "years" in ipw.columns else 1.0
-                    pv = (1.0 + r) ** -(p - ref_year)
-                    new_factors[p] = pv * yrs
-                    ipw.at[p, "objective"] = new_factors[p]
+                    ipw.at[p, "objective"] = disc["factors"][p]
+                basis["discount"] = {
+                    "ref_year": int(disc["ref_year"]), "real_rate": float(r),
+                    "factors": {str(p): float(disc["factors"][p]) for p in periods_active},
+                }
                 infl_note = f", inflation_rate={infl:.3f}, real={r:.3f}" if infl != 0.0 else ""
                 phase(
                     f"Auto-discount: ipw.objective set to PV × years for {len(periods_active)} "
                     f"period(s) at discount_rate={r_nom:.3f}{infl_note}: " +
-                    ", ".join(f"{p}:{new_factors[p]:.3f}" for p in periods_active)
+                    ", ".join(f"{p}:{disc['factors'][p]:.3f}" for p in periods_active)
                 )
-                def _restore_ipw_objective(orig=original_obj):
-                    for p in orig.index:
-                        n.investment_period_weightings.at[p, "objective"] = float(orig.at[p])
-                undo_actions.append(("call", _restore_ipw_objective))
-            except Exception as exc:
-                phase(f"Auto-discount setup failed: {exc}. Periods stay at original weights.")
+        except Exception as exc:
+            phase(f"Auto-discount setup failed: {exc}. Periods stay at original weights.")
 
         # 5) Per-period × per-carrier load scaling. For each load column, look up
         #    its (canonical carrier, period) and multiply by the resolved factor.

@@ -298,8 +298,8 @@ def test_the_snapshot_outlives_the_restore(baseline, monkeypatch):
     original = solver_service._apply_modelling_assumptions
     at_restore = []
 
-    def wrapped(network, config, phase):
-        restore, captured = original(network, config, phase)
+    def wrapped(network, config, phase, **kw):
+        restore, captured = original(network, config, phase, **kw)
 
         def restore_reading():
             at_restore.append(identity(ctx()))  # every transient still applied
