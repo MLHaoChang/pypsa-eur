@@ -26,7 +26,7 @@ TOOLS = [
         "the active project's energization schedule, flat across that "
         "period's snapshots: the same edit as Guided section 3's connection "
         "drawer. `link` is the connection Link's name; `period` is a model "
-        "year on a multi-period network, or \"all\" (or null) on a "
+        'year on a multi-period network, or "all" (or null) on a '
         "single-period one; `mw` is a number above 0. Read the current values "
         "first with get_project_flow: the connection row's `energization` "
         "lists each Link and its `by_period` MW. One undo step per call; the "
@@ -40,13 +40,19 @@ TOOLS = [
         "Link's rating is accepted, and the answer's `note` says it does not "
         "raise the Link's capacity: relay that. Safety: write.",
         {
-            "name": {"type": "string", "description": "The project's name (the open project)."},
+            "name": {
+                "type": "string",
+                "description": "The project's name (the open project).",
+            },
             "link": {"type": "string", "description": "The connection Link's name."},
             "period": {
                 "type": ["string", "integer", "null"],
-                "description": "A model year, or \"all\" / null on a single-period network.",
+                "description": 'A model year, or "all" / null on a single-period network.',
             },
-            "mw": {"type": "number", "description": "The energized MW for that period, above 0."},
+            "mw": {
+                "type": "number",
+                "description": "The energized MW for that period, above 0.",
+            },
         },
         ["name", "link", "mw"],
     ),

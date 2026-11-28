@@ -28,8 +28,11 @@ def _call(**args):
     chat turn binds for the open project (the HTTP request's is gone)."""
     from services.pypsa_service import PyPSAService
 
-    ctx = next(c for c in list(PyPSAService._contexts.values())
-               if c.loaded_project == args["name"])
+    ctx = next(
+        c
+        for c in list(PyPSAService._contexts.values())
+        if c.loaded_project == args["name"]
+    )
     binding = PyPSAService.bind_request_context(ctx)
     try:
         return chat_tools.DISPATCHERS[TOOL](**args)
@@ -39,7 +42,9 @@ def _call(**args):
 
 def test_the_tool_is_a_write_on_the_energization_route():
     assert catalogue.safety_tier_for(TOOL) == "write"
-    assert catalogue.TOOL_ROUTES[TOOL] == [("PUT", "/api/projects/{name}/flow/energization")]
+    assert catalogue.TOOL_ROUTES[TOOL] == [
+        ("PUT", "/api/projects/{name}/flow/energization")
+    ]
     # The handler takes its own undo step and edit-counter bump: the loop must
     # not add a second of either.
     assert not catalogue.tool_edits_network(TOOL)
@@ -52,14 +57,20 @@ def test_chat_sets_one_period_as_the_drawer_does(client, tmp_projects_dir):
     name = _create(client, "eh_datacenter_staged", "staged02c")
     info = client.get("/api/network/undo/info").json()
     out = _call(name=name, link=LINK, period=2030, mw=30)
-    assert out["message"] == f"The energized capacity of {LINK} for 2030 is now 30 MW (was 55 MW)."
+    assert (
+        out["message"]
+        == f"The energized capacity of {LINK} for 2030 is now 30 MW (was 55 MW)."
+    )
     assert out["period"] == "2030" and out["note"] is None and "series" not in out
     after = client.get("/api/network/undo/info").json()
     assert after["depth"] == info["depth"] + 1  # one undo step
     assert after["network_revision"] > info["network_revision"]
     assert after["unsaved"] is True
     assert change_log_service.get_all()[0]["description"] == out["message"]
-    assert _row(client, name)["energization"][0]["by_period"] == {**AS_BUILT, "2030": 30.0}
+    assert _row(client, name)["energization"][0]["by_period"] == {
+        **AS_BUILT,
+        "2030": 30.0,
+    }
 
 
 def test_chat_names_the_rating_it_does_not_raise(client, tmp_projects_dir):
@@ -77,7 +88,10 @@ def test_chat_names_the_rating_it_does_not_raise(client, tmp_projects_dir):
         ({"link": LINK, "period": 2030, "mw": True}, "energization_invalid_mw"),
         ({"link": LINK, "period": 2030, "mw": float("nan")}, "energization_invalid_mw"),
         ({"link": LINK, "period": 2030, "mw": 0}, "energization_invalid_mw"),
-        ({"link": "no_such_link", "period": 2030, "mw": 10}, "energization_no_schedule"),
+        (
+            {"link": "no_such_link", "period": 2030, "mw": 10},
+            "energization_no_schedule",
+        ),
         ({"link": LINK, "period": 2099, "mw": 10}, "energization_unknown_period"),
     ],
 )
@@ -107,15 +121,27 @@ def test_a_viewer_is_refused_before_dispatch_and_nothing_changes(world, as_user)
     chat_tools.set_acting_user(world["viewer"])
     before = lc43_gates.state(world["path"])
     try:
-        frames = list(dispatch_tool_call(
-            ChatSession(),
-            {"id": "viewer-energization", "name": TOOL,
-             "input": {"name": "Tool Baseline", "link": LINK, "period": "all", "mw": 5}},
-            [],
-        ))
+        frames = list(
+            dispatch_tool_call(
+                ChatSession(),
+                {
+                    "id": "viewer-energization",
+                    "name": TOOL,
+                    "input": {
+                        "name": "Tool Baseline",
+                        "link": LINK,
+                        "period": "all",
+                        "mw": 5,
+                    },
+                },
+                [],
+            )
+        )
     finally:
         PyPSAService.reset_request_context(binding)
     errors = [d for e, d in frames if e == "tool_error"]
     assert errors and errors[0].get("error_kind") == KIND, frames
-    assert not any(e in {"tool_pending_confirmation", "tool_running"} for e, _ in frames)
+    assert not any(
+        e in {"tool_pending_confirmation", "tool_running"} for e, _ in frames
+    )
     assert lc43_gates.state(world["path"]) == before

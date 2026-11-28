@@ -22,16 +22,20 @@ from typing import Any
 _UNSET = object()
 
 
-def set_energization_period(name: str, link: Any = _UNSET, mw: Any = _UNSET,
-                            period: Any = None) -> dict:
+def set_energization_period(
+    name: str, link: Any = _UNSET, mw: Any = _UNSET, period: Any = None
+) -> dict:
     """`PUT .../flow/energization`: one period of one Link set to one MW value."""
     from routers.flow import put_flow_energization as _h
     from services.chat_tools import _authorized_project, _route
 
     # Sent as the HTTP body would be: a key the model left out stays out, so
     # the route's own shape check refuses it (energization_invalid_request).
-    body = {k: v for k, v in (("link", link), ("period", period), ("mw", mw))
-            if v is not _UNSET}
+    body = {
+        k: v
+        for k, v in (("link", link), ("period", period), ("mw", mw))
+        if v is not _UNSET
+    }
     return _route(_h, body, project=_authorized_project(name))
 
 
