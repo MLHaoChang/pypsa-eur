@@ -89,10 +89,10 @@ def test_the_asset_type_matcher_follows_the_frontend(case):
 
 def test_guide_text_is_searched_without_its_markdown():
     text = lookup._plain_text(
-        "See [the tap ratio](guide/tap.md).\n```py\nhidden_code = 1\n```\n## **Bold** | cell > quote"
+        "See [the tap ratio](guide/tap.md).\n```py\nhiddencode = 1\n```\n## **Bold** | cell > quote"
     )
     assert "the tap ratio" in text and "guide/tap" not in text
-    assert "hidden_code" not in text
+    assert "hiddencode" not in text
     assert not set(text) & set("#*_`>|")
 
 

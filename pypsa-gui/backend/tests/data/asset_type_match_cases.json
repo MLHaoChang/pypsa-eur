@@ -293,6 +293,37 @@
    },
    "backend": "chp",
    "frontend": "chp"
+  },
+  {
+   "why": "an H2 link between two power buses is neither electrolyser nor fuel cell",
+   "cls": "Link",
+   "row": {
+    "name": "x",
+    "carrier": "h2",
+    "bus0": "B1",
+    "bus1": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2"
+   },
+   "backend": "feeder",
+   "frontend": "feeder"
+  },
+  {
+   "why": "an H2 link with no far bus is not an electrolyser",
+   "cls": "Link",
+   "row": {
+    "name": "x",
+    "carrier": "h2",
+    "bus0": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2"
+   },
+   "backend": "feeder",
+   "frontend": "feeder"
   }
  ]
 }
