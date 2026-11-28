@@ -147,3 +147,24 @@ describe('assistant prose link policy (A5.3)', () => {
     expect(screen.getByRole('link', { name: 'docs' }).getAttribute('href')).toBe('https://docs.pypsa.org/')
   })
 })
+
+describe('plain names in an assistant reply (expert-catalogue §7.3)', () => {
+  const reply = 'Set `e_nom` to 200 MWh; `p_nom` stays.\n\n```\nn.stores.e_nom = `e_nom`\n```'
+  const codes = (c: HTMLElement) => [...c.querySelectorAll('code')].map((e) => e.textContent)
+
+  it('shows a backticked name as plain words; an ambiguous name and fenced code stay code', () => {
+    const { container } = render(<ChatMarkdown plainNames={{}}>{reply}</ChatMarkdown>)
+    expect(container.querySelector('p')?.textContent).toBe('Set Energy capacity to 200 MWh; p_nom stays.')
+    expect(codes(container)).toEqual(['p_nom', 'n.stores.e_nom = `e_nom`\n'])
+  })
+
+  it('keeps a name the user asked about raw', () => {
+    const { container } = render(<ChatMarkdown plainNames={{ userText: 'What is e_nom?' }}>{reply}</ChatMarkdown>)
+    expect(codes(container)).toContain('e_nom')
+  })
+
+  it('changes nothing without plainNames (user text, reports, cards)', () => {
+    const { container } = render(<ChatMarkdown>{reply}</ChatMarkdown>)
+    expect(codes(container)).toContain('e_nom')
+  })
+})

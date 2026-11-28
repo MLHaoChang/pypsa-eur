@@ -3,7 +3,7 @@
 
 # 05 — Chat side of the catalogue (01b): `find_parameter`, `open_parameter`, plain names in results, display replacement in text and speech
 
-Status: ready-for-agent
+Status: done
 Type: task
 Gated: yes (GK B)
 Spec: [spec.md](../spec.md) §3.6, §7.1, §7.3, §10.1 "Chat"
@@ -34,3 +34,4 @@ Depends on: 01. Opens after #1575, #1590 and #1586 merge (GK B ruling on #1597).
 
 - 2026-11-21, slice 02c (raw-name guard): `pages/hubDesign/delegate.ts` (Site card fix requests sent to the assistant: `grid_import`, `outage_rate_value`, `mttr_hours`) has allow rows in `pypsa-gui/frontend/src/uiCopyGuard.allow.json` naming this slice. Remove them when the requests use plain names.
 - 2026-11-28, part A (backend; GK B2 plan GO with P1–P8): `find_parameter`, `open_parameter`, `plain_names` and a `plain_name` key on refusals from the generic write tools, the prompt line, and the scorer's raw-name count. The case tables are shared with vitest (`backend/tests/data/catalogue_search_cases.json`, `asset_type_match_cases.json`). The checked answers' method notes are follow-up issue 12. Part B (display replacement in text and speech, the `delegate.ts` allow rows) follows after #2128.
+- 2026-11-28, part B (display replacement): `displayPlainNames` (`frontend/src/catalogue/displayPlainNames.ts`) shows a backticked model name in assistant text as the catalogue's plain name (`modelNames.generated.json`, the server's `lookup.plain_name`), in `ChatMarkdown` for assistant messages and before `plainTextForSpeech`; the server copy (`services/chat_plain_names.display_plain_names`) runs on the live-voice TTS path in `live_speech.queue_answer`. The snake_case rule moved to `catalogue/modelNameRule.ts`, read by the guard and the replacement. Ambiguous and unknown names, a name the user's message used, fenced code and `>` quotes stay raw. One case table, `backend/tests/data/display_plain_names_cases.json`, read by vitest and pytest. `delegate.ts` Site fix requests use plain names; their seven allow rows are gone. Confirmation-card details (`choice.detail`), report sections and the companion answer card render through `ChatMarkdown` without the replacement. Shot: `frontend/scripts/chat-plain-names-shots.mjs`.

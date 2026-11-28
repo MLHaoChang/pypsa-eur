@@ -199,8 +199,9 @@ def test_a_read_tool_is_reported_as_done_not_applied(stub):
 
 # ── branch 3 (P25 gate B1 smoke): the Site grid fix ─────────────────────────
 SITE_GRID = ("On the Site card, the grid connection is missing. Run suggest_eh_setup, "
-             "then tag the import Link with eh_role = grid_import and the grid-side bus "
-             "eh_poc = true, explaining each choice before the confirmation.")
+             "then tag the import Link with the Energy Hub role Grid import and mark the "
+             "grid-side bus as the Grid point of connection, explaining each choice before "
+             "the confirmation.")
 SUGGESTED = {"status": "ok", "actions": [
     {"tool": "update_component", "args": {"component_class": "Link", "name": "grid_import",
                                            "attrs": {"eh_role": "grid_import"}},
@@ -265,7 +266,7 @@ def test_branch_3_with_nothing_to_suggest_says_so(stub):
 
 
 SITE_CRITICAL = ("On the Site card, no critical load is tagged. Propose which buses must "
-                 "stay on (eh_critical = true) and tag them after I confirm.")
+                 "stay on (Critical bus) and tag them after I confirm.")
 
 
 def test_branch_3_critical_fix_reads_then_runs_the_critical_action(stub):

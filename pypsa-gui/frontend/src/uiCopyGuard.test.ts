@@ -12,6 +12,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { escapeRe, NAME_EDGE, NAME_END, snakeNameRule, word } from './catalogue/modelNameRule'
 
 const SRC = path.resolve(__dirname)
 const REPO = path.resolve(SRC, '../../..')
@@ -143,21 +144,14 @@ export function libraryIds(): string[] {
   return [...ids].sort()
 }
 
-function escapeRe(s: string): string {
-  return s.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-}
-
-const word = (alts: string[]) => alts.map(escapeRe).sort((a, b) => b.length - a.length).join('|')
-
 /** Name rules, built from the three sources above. */
 export function nameRules(names = { model: modelNames(), template: templateIds(), library: libraryIds() }) {
-  const snake = names.model.filter((n) => n.includes('_'))
   const short = names.model.filter((n) => !n.includes('_'))
-  const edge = '(?<![A-Za-z0-9_])'
-  const end = '(?![A-Za-z0-9_])'
+  const edge = NAME_EDGE
+  const end = NAME_END
   return {
-    // A snake_case model name anywhere, as a whole word.
-    snake: new RegExp(`${edge}(?:${word(snake)})${end}`),
+    // A snake_case model name anywhere, as a whole word: the display replacement's rule too.
+    snake: snakeNameRule(names.model),
     // A short model name ("x", "bus") only quoted or as `name=`; inside <code> see shortInCode.
     // An HTML attribute (`x="4"`, `data-bus-name="`) or a CSS selector (`[type=hidden]`) is markup, not copy.
     short: new RegExp(`(?:["'\`“‘](?:${word(short)})["'\`”’])|(?<![A-Za-z0-9_[-])(?:${word(short)})=(?!["'])`),
@@ -282,13 +276,6 @@ const PINNED_ALLOW_KEYS = [
   'pages/SolverSettings.tsx|sub_network',
   'pages/SolverSettings.tsx|p_set',
   'pages/SolverSettings.tsx|p_max_pu',
-  'pages/hubDesign/delegate.ts|grid_import',
-  'pages/hubDesign/delegate.ts|outage_rate_value',
-  'pages/hubDesign/delegate.ts|mttr_hours',
-  'pages/hubDesign/delegate.ts|eh_role',
-  'pages/hubDesign/delegate.ts|eh_poc',
-  'pages/hubDesign/delegate.ts|eh_critical',
-  'pages/hubDesign/delegate.ts|eh_sk_mva',
   'pages/modelHorizon/StepPeriodEconomics.tsx|discount_rate',
   'pages/modelHorizon/StepPeriodEconomics.tsx|overnight_cost',
   'pages/modelHorizon/StepPeriodEconomics.tsx|p_nom',

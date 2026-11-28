@@ -24,7 +24,7 @@ from collections.abc import Callable
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from services.asset_schema import lookup
+from services.asset_schema import catalogue, lookup
 
 
 def plain_names_for(component_class: str, keys) -> dict[str, str]:
@@ -139,3 +139,126 @@ COLUMNS = {
     "bulk_update_components": _keys_of("updates"),
     "batch_create_components": _batch_keys,
 }
+
+
+# ── display replacement (spec §7.3) ─────────────────────────────────────────
+# The server's copy of `frontend/src/catalogue/displayPlainNames.ts`, for the
+# live-voice TTS path (`services/live_speech.py`): a backticked model name in
+# the assistant's text is spoken as its plain name. Same rule as the raw-name
+# guard (`catalogue/modelNameRule.ts`), same case table
+# (`tests/data/display_plain_names_cases.json`).
+
+# The Properties panel still shows `FieldSpec.label` for these, which is not the
+# catalogue's word (Line s_nom: "Capacity" there, "Rating" here), so chat keeps
+# them raw until expert-catalogue slice 03 moves the panel to the catalogue.
+# Every snake_case name whose label differs on some class, derived and pinned by
+# `tests/test_display_plain_names.py` (it fails when this drifts, or once a
+# label matches). Chat cannot tell the class, so a name is raw on every class.
+# Mirrored in `frontend/src/catalogue/displayPlainNames.ts`; both are pinned to
+# `panel_names_differ` in the case table.
+PANEL_NAMES_DIFFER = frozenset(
+    {
+        "capital_cost",
+        "e_nom_extendable",
+        "e_nom_max",
+        "e_nom_min",
+        "marginal_cost",
+        "p_nom_extendable",
+        "p_nom_max",
+        "p_nom_min",
+        "s_nom",
+        "s_nom_extendable",
+        "s_nom_max",
+        "s_nom_min",
+    }
+)
+
+_EDGE = r"(?<![A-Za-z0-9_])"
+_END = r"(?![A-Za-z0-9_])"
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_QUOTE = re.compile(r"^\s*>")
+_RUN = re.compile(r"`+")
+
+
+@functools.lru_cache(maxsize=1)
+def _display_index() -> tuple[re.Pattern[str], dict[str, str | None]]:
+    """The snake_case rule over the catalogue's model names, and each name's one
+    plain name (None when classes name it differently)."""
+    words: dict[str, str | None] = {}
+    for scope, by_name in catalogue.model_names().items():
+        for key in by_name:
+            word = lookup.plain_name(scope, key)
+            words[key] = None if key in words and words[key] != word else word
+    for key in PANEL_NAMES_DIFFER:
+        words[key] = None
+    snake = sorted((k for k in words if "_" in k), key=len, reverse=True)
+    rule = re.compile(_EDGE + "(?:" + "|".join(map(re.escape, snake)) + ")" + _END)
+    return rule, words
+
+
+def _replace_line(line: str, swap: Callable[[str], str | None]) -> str:
+    """One line outside fenced code and quotes: its single-backtick spans,
+    paired by run length (CommonMark)."""
+    runs = list(_RUN.finditer(line))
+    out, at, i = [], 0, 0
+    while i < len(runs):
+        o = runs[i]
+        close = next(
+            (
+                j
+                for j in range(i + 1, len(runs))
+                if len(runs[j].group()) == len(o.group())
+            ),
+            None,
+        )
+        if close is None:
+            i += 1
+            continue
+        word = (
+            swap(line[o.end() : runs[close].start()]) if len(o.group()) == 1 else None
+        )
+        if word is not None:
+            out.append(line[at : o.start()] + word)
+            at = runs[close].end()
+        i = close + 1
+    return "".join(out) + line[at:]
+
+
+def display_plain_names(text: str, user_text: str = "") -> str:
+    """``text`` (assistant markdown) with each backticked catalogue model name as
+    its plain name. Never bare prose, fenced code or quoted (``>``) text; an
+    ambiguous or unknown name, or one ``user_text`` names, stays raw."""
+    if not text or "`" not in text:
+        return text
+    rule, words = _display_index()
+    asked = {m.group() for m in rule.finditer(user_text or "")}
+
+    def swap(token: str) -> str | None:
+        if token in asked or not rule.fullmatch(token):
+            return None
+        return words.get(token)
+
+    fence: str | None = None
+    quoted = False
+    lines = []
+    for line in text.split("\n"):
+        if fence is not None:
+            closing = (
+                r"^ {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}\s*$"
+            )
+            if re.match(closing, line):
+                fence = None
+            lines.append(line)
+            continue
+        f = _FENCE.match(line)
+        if f:
+            fence, quoted = f.group(1), False
+            lines.append(line)
+            continue
+        if not line.strip():
+            quoted = False
+        elif _QUOTE.match(line):
+            quoted = True
+        # A quote runs on (lazy continuation) until a blank line.
+        lines.append(line if quoted else _replace_line(line, swap))
+    return "\n".join(lines)

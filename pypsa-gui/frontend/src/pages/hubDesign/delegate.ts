@@ -10,6 +10,8 @@ import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type UiMode } from '../../store/uiStore'
 import type { HubStep } from './hubDesignStore'
 import { plainWords } from './plainWords'
+import { plainNameOf } from '../../catalogue/displayPlainNames'
+import { ehRoleLabel } from '../../plainNames'
 
 export function ask(text: string): void {
   useUIStore.getState().setAssistantDockOpen(true)
@@ -38,17 +40,21 @@ export function delegateTitle(mode: UiMode): string {
 
 export type SiteFix = 'grid' | 'critical' | 'strength' | 'outage'
 
+/** A field's plain name, the catalogue's word (RAW-NAMES-1): the request shows in
+ *  the transcript as the user's message, and the assistant maps it back. */
+const field = (cls: string, key: string): string => plainNameOf(cls, key) ?? key
+
 /** Site-card fix requests (§5.7). */
 export function siteFixText(kind: SiteFix, n = 0): string {
   switch (kind) {
     case 'grid':
-      return 'On the Site card, the grid connection is missing. Run suggest_eh_setup, then tag the import Link with eh_role = grid_import and the grid-side bus eh_poc = true, explaining each choice before the confirmation.'
+      return `On the Site card, the grid connection is missing. Run suggest_eh_setup, then tag the import Link with the ${field('Link', 'eh_role')} ${ehRoleLabel('grid_import')} and mark the grid-side bus as the ${field('Bus', 'eh_poc')}, explaining each choice before the confirmation.`
     case 'critical':
-      return 'On the Site card, no critical load is tagged. Propose which buses must stay on (eh_critical = true) and tag them after I confirm.'
+      return `On the Site card, no critical load is tagged. Propose which buses must stay on (${field('Bus', 'eh_critical')}) and tag them after I confirm.`
     case 'strength':
-      return 'On the Site card, grid-strength data is missing. Ask me for the short-circuit level (MVA) at the point of connection and set eh_sk_mva on that bus after I confirm.'
+      return `On the Site card, grid-strength data is missing. Ask me for the short-circuit level (MVA) at the point of connection and set it as that bus's ${field('Bus', 'eh_sk_mva')} after I confirm.`
     case 'outage':
-      return `On the Site card, ${n} units have no outage data. List them and ask me for outage rate and repair time per unit, then set outage_rate_value and mttr_hours after I confirm.`
+      return `On the Site card, ${n} units have no outage data. List them and ask me for outage rate and repair time per unit, then set their ${field('Generator', 'outage_rate_value')} and ${field('Generator', 'mttr_hours')} after I confirm.`
   }
 }
 

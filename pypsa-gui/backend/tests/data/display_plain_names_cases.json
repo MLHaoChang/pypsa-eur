@@ -1,0 +1,141 @@
+{
+ "about": "Display replacement in chat (expert-catalogue spec §7.3), shared by frontend/src/catalogue/displayPlainNames.test.ts (displayPlainNames: the chat text and the browser speech path) and tests/test_display_plain_names.py (services/chat_plain_names.py display_plain_names: the live-voice TTS path). user is the message the text answers. Plain names are the Parameter catalogue's (modelNames.generated.json on the frontend, asset_schema lookup on the server).",
+ "panel_names_differ": [
+  "capital_cost",
+  "e_nom_extendable",
+  "e_nom_max",
+  "e_nom_min",
+  "marginal_cost",
+  "p_nom_extendable",
+  "p_nom_max",
+  "p_nom_min",
+  "s_nom",
+  "s_nom_extendable",
+  "s_nom_max",
+  "s_nom_min"
+ ],
+ "cases": [
+  {
+   "why": "a backticked catalogue name is shown as its plain name",
+   "text": "Set `e_nom` to 200 MWh.",
+   "want": "Set Energy capacity to 200 MWh."
+  },
+  {
+   "why": "a name shared by classes with different plain names stays raw (p_nom: Capacity or Power)",
+   "text": "Raise `p_nom` on the PV array.",
+   "want": "Raise `p_nom` on the PV array."
+  },
+  {
+   "why": "a name the catalogue does not hold stays raw",
+   "text": "Tag the link `grid_import`, and read `p_nom_opt` after the run.",
+   "want": "Tag the link `grid_import`, and read `p_nom_opt` after the run."
+  },
+  {
+   "why": "fenced code is left as written",
+   "text": "Like this:\n```python\nn.stores.loc['h2', 'e_nom'] = 200  # `e_nom`\n```\nThen `e_nom` is set.",
+   "want": "Like this:\n```python\nn.stores.loc['h2', 'e_nom'] = 200  # `e_nom`\n```\nThen Energy capacity is set."
+  },
+  {
+   "why": "a tilde fence is code too",
+   "text": "~~~\n`s_nom`\n~~~",
+   "want": "~~~\n`s_nom`\n~~~"
+  },
+  {
+   "why": "bare prose is never replaced",
+   "text": "The e_nom of the store and its marginal_cost stay.",
+   "want": "The e_nom of the store and its marginal_cost stay."
+  },
+  {
+   "why": "quoted text (often the user's own words) is left as written, up to the blank line",
+   "text": "> You asked about `e_nom`\nand `s_nom`.\n\nHere `e_nom` is 200 MWh.",
+   "want": "> You asked about `e_nom`\nand `s_nom`.\n\nHere Energy capacity is 200 MWh."
+  },
+  {
+   "why": "about the key: a name in the user's message stays raw in the reply, others are replaced",
+   "user": "what is e_nom?",
+   "text": "`e_nom` is the store's size in MWh; a load's size is its `p_set`.",
+   "want": "`e_nom` is the store's size in MWh; a load's size is its Demand."
+  },
+  {
+   "why": "several tokens in one line",
+   "text": "`e_nom`, `s_nom`, `p_set` and `marginal_cost` are set; `p_nom` is not.",
+   "want": "Energy capacity, `s_nom`, Demand and `marginal_cost` are set; `p_nom` is not."
+  },
+  {
+   "why": "only single-backtick spans holding exactly one name",
+   "text": "``e_nom`` and ` s_nom ` and `e_nom = 2` stay.",
+   "want": "``e_nom`` and ` s_nom ` and `e_nom = 2` stay."
+  },
+  {
+   "why": "a component id that looks like snake_case is not a model name and stays raw",
+   "text": "Rename the generator `wind_farm` and the bus `grid_bus_1`.",
+   "want": "Rename the generator `wind_farm` and the bus `grid_bus_1`."
+  },
+  {
+     "why": "a name inside a longer identifier the user typed is not one the user asked about",
+     "user": "what is e_nom_x or my_e_nom or e_nom2?",
+     "text": "`e_nom` is the size.",
+     "want": "Energy capacity is the size."
+  },
+  {
+     "why": "a one-word key is not a snake_case model name and stays raw",
+     "text": "Set `efficiency` and `bus`.",
+     "want": "Set `efficiency` and `bus`."
+  },
+  {
+     "why": "a fence opened with four spaces is not a fence",
+     "text": "    ```\n`e_nom`",
+     "want": "    ```\nEnergy capacity"
+  },
+  {
+     "why": "an indented line does not close a fence",
+     "text": "```\n    ```\n`e_nom`\n```",
+     "want": "```\n    ```\n`e_nom`\n```"
+  },
+  {
+     "why": "a tilde line does not close a backtick fence",
+     "text": "```\n~~~\n`e_nom`\n```",
+     "want": "```\n~~~\n`e_nom`\n```"
+  },
+  {
+     "why": "a shorter fence does not close a longer one",
+     "text": "````\n```\n`e_nom`\n````",
+     "want": "````\n```\n`e_nom`\n````"
+  },
+  {
+     "why": "a longer fence closes a shorter one",
+     "text": "```\n`e_nom`\n`````\n`e_nom`",
+     "want": "```\n`e_nom`\n`````\nEnergy capacity"
+  },
+  {
+     "why": "a fence line with text after it does not close",
+     "text": "```\n``` x\n`e_nom`\n```",
+     "want": "```\n``` x\n`e_nom`\n```"
+  },
+  {
+     "why": "an indented quote marker is still a quote",
+     "text": "  > `e_nom`",
+     "want": "  > `e_nom`"
+  },
+  {
+     "why": "a blank line of spaces ends a quote",
+     "text": "> q\n   \n`e_nom`",
+     "want": "> q\n   \nEnergy capacity"
+  },
+  {
+     "why": "a trailing newline is kept",
+     "text": "`e_nom`\n",
+     "want": "Energy capacity\n"
+  },
+  {
+     "why": "the opening fence line itself is never replaced",
+     "text": "~~~ `e_nom`\n~~~",
+     "want": "~~~ `e_nom`\n~~~"
+  },
+  {
+   "why": "the names the Properties panel still labels differently stay raw until expert-catalogue slice 03 (UX 34)",
+   "text": "Set `marginal_cost`, `capital_cost`, `p_nom_min`, `s_nom_max`, `e_nom_extendable` and the line's `s_nom`; `e_nom` is replaced.",
+   "want": "Set `marginal_cost`, `capital_cost`, `p_nom_min`, `s_nom_max`, `e_nom_extendable` and the line's `s_nom`; Energy capacity is replaced."
+  }
+ ]
+}

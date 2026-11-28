@@ -56,55 +56,6 @@
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   },
   {
-    "file": "pages/hubDesign/delegate.ts",
-    "text": "grid_import",
-    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
-    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
-  },
-  {
-    "file": "pages/hubDesign/delegate.ts",
-    "text": "outage_rate_value",
-    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
-    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
-  },
-  {
-    "file": "pages/hubDesign/delegate.ts",
-    "text": "mttr_hours",
-    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
-    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
-  },
-  {
-    "file": "pages/hubDesign/delegate.ts",
-    "text": "eh_role",
-    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
-    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
-  },
-  {
-    "file": "pages/hubDesign/delegate.ts",
-    "text": "eh_poc",
-    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
-    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
-  },
-  {
-    "file": "pages/hubDesign/delegate.ts",
-    "text": "eh_critical",
-    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
-    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
-  },
-  {
-    "file": "pages/hubDesign/delegate.ts",
-    "text": "eh_sk_mva",
-    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
-    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
-  },
-  {
     "file": "pages/modelHorizon/StepPeriodEconomics.tsx",
     "text": "discount_rate",
     "surface": "Model horizon wizard, period economics step (Expert)",
