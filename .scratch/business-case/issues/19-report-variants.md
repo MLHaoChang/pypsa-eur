@@ -3,9 +3,9 @@
 
 # 19 Report variants: top N by NPV, greatest IRR, one per participant (K9 / C4)
 
-Status: ready-for-agent; audit 2026-11-25: nothing built on master
+Status: ready-for-agent; audit 2026-11-28: nothing built on master; option 1 (top N by NPV, greatest IRR) is unblocked, per-participant waits for site-commercial-ux/04
 Owner: BC19-NPV-1.
-Blocked by: `site-commercial-ux/04` (party board, for the per-participant variant)
+Blocked by: none for option 1 (BC19-NPV-1); the per-participant variant waits for `site-commercial-ux/04` (party board, still ready-for-agent and unbuilt)
 Design: `.scratch/project-workflow/commercial-finance.md` §7 row K9; design.md:317.
 Source: gap review 2026-11-21, design map.
 Model: sonnet. Review: UX + GK B.
@@ -34,3 +34,7 @@ Reports come in one form per project. The design promises variants: the top N op
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: no 'Top 3 by NPV' or 'Greatest IRR' variant in backend or frontend/src; no PR named.
+
+## Audit (2026-11-28)
+
+- 2026-11-28 audit: grep for 'Top 3 by NPV' and 'Greatest IRR' in backend and frontend/src finds nothing; no PR named. The owner decision BC19-NPV-1 picked option 1, so the first slice reads the existing option comparison and needs nothing else. Left: all of option 1's acceptance criteria. Split the per-participant report off as its own issue when `site-commercial-ux/04` starts. Model: sonnet, review UX + GK B.
