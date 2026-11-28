@@ -29,8 +29,10 @@ def set_energization_period(
     from routers.flow import put_flow_energization as _h
     from services.chat_tools import _authorized_project, _route
 
-    # Sent as the HTTP body would be: a key the model left out stays out, so
-    # the route's own shape check refuses it (energization_invalid_request).
+    # Sent as the HTTP body would be: a `link` or `mw` the model left out stays
+    # out, so the route's own shape check refuses it (energization_invalid_request).
+    # A missing `period` is null, as the route reads an absent one: "all" on a
+    # single-period network, energization_unknown_period on a multi-period one.
     body = {
         k: v
         for k, v in (("link", link), ("period", period), ("mw", mw))

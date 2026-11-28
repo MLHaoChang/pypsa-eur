@@ -88,6 +88,8 @@ def test_chat_names_the_rating_it_does_not_raise(client, tmp_projects_dir):
         ({"link": LINK, "period": 2030, "mw": True}, "energization_invalid_mw"),
         ({"link": LINK, "period": 2030, "mw": float("nan")}, "energization_invalid_mw"),
         ({"link": LINK, "period": 2030, "mw": 0}, "energization_invalid_mw"),
+        ({"link": LINK, "period": 2030, "mw": float("inf")}, "energization_invalid_mw"),
+        ({"link": LINK, "period": 2030, "mw": "ten"}, "energization_invalid_mw"),
         (
             {"link": "no_such_link", "period": 2030, "mw": 10},
             "energization_no_schedule",
@@ -105,6 +107,17 @@ def test_each_refusal_is_the_routes_typed_422_and_writes_nothing(
     assert exc.value.status_code == 422
     assert exc.value.detail["error_kind"] == kind
     assert client.get("/api/network/undo/info").json() == info
+    assert _row(client, name)["energization"][0]["by_period"] == AS_BUILT
+
+
+def test_chat_is_refused_when_the_project_is_not_the_open_one(client, tmp_projects_dir):
+    """The route's open-project rule holds on the chat path: called outside the
+    project's context, nothing is written."""
+    name = _create(client, "eh_datacenter_staged", "staged02c_closed")
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.DISPATCHERS[TOOL](name=name, link=LINK, period=2030, mw=30)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "flow_project_not_open"
     assert _row(client, name)["energization"][0]["by_period"] == AS_BUILT
 
 
