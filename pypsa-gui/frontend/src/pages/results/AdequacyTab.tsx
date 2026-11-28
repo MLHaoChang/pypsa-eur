@@ -9,6 +9,7 @@ import {
   AdequacyChips, CoptChips,
   type AdequacyReportPayload, type CoptPayload,
 } from './adequacy'
+import { AssumptionsBehindResult } from '../hubDesign/cards/AssumptionsBehindResult'
 import { FrontPanel } from './FrontPanel'
 import { FrontierPanel } from './FrontierPanel'
 import { ReserveMarginPanel } from './ReserveMarginPanel'
@@ -95,6 +96,8 @@ export default function AdequacyTab() {
           where they disagree is the diagnostic, not a bug.
         </p>
       </header>
+
+      <AssumptionsBehindResult testId="adequacy-assumptions" />
 
       {report ? (
         <AdequacyChips report={report} />
