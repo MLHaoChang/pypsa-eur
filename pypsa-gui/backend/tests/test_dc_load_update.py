@@ -206,3 +206,42 @@ def test_a_series_change_needs_the_open_network(
         update_dc_load(project_dir, _eh_templates(), {"pue_at_design": 1.5}, None)
     assert exc.value.kind == "project_not_open"
     assert _marker(client, name) == marker
+
+
+def test_a_put_never_rewrites_an_unsaved_foreground_network(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx
+):
+    name = _make(client, tmp_path, monkeypatch, "eh_datacenter", "dc_draft")
+    ctx = session_ctx(client)
+    before, marker = _loads(ctx), _marker(client, name)
+    monkeypatch.setattr(ctx, "loaded_project", None)
+    r = client.put(
+        f"/api/campus-electrical/{name}/dc-load", json={"pue_at_design": 1.5}
+    )
+    assert (
+        r.status_code == 409 and r.json()["detail"]["error_kind"] == "project_not_open"
+    )
+    assert _loads(ctx).equals(before) and _marker(client, name) == marker
+
+
+def test_a_study_on_the_projects_own_context_refuses(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx
+):
+    from fastapi import HTTPException
+
+    from services.pypsa_service import PyPSAService
+
+    name = _make(client, tmp_path, monkeypatch, "eh_datacenter", "dc_own")
+    ctx = session_ctx(client)
+    before, marker = _loads(ctx), _marker(client, name)
+
+    def refuse(cls, action="", *, ctx=None):
+        if ctx is not None:  # only the project's own context is running a study
+            raise HTTPException(409, {"error_kind": "study_running"})
+
+    monkeypatch.setattr(PyPSAService, "refuse_if_study_running", classmethod(refuse))
+    r = client.put(
+        f"/api/campus-electrical/{name}/dc-load", json={"backup": {"mode": "hybrid"}}
+    )
+    assert r.status_code == 409
+    assert _loads(ctx).equals(before) and _marker(client, name) == marker
