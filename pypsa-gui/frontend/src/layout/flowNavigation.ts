@@ -372,6 +372,16 @@ export function openConnectionLimitEditor(): void {
   else openFlowTargetInPlace(CONNECTION_LIMIT_TARGET)
 }
 
+/** The background harmonics at the PCC (grid-compliance 29): the measurement's one editor, a line under
+ *  Connection limits. Expert opens the section's panel; Guided the field drawer over the Site card. */
+export const BACKGROUND_HARMONICS_TARGET: FlowTarget = {
+  section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: 'background_harmonics',
+}
+export function openBackgroundHarmonicsEditor(): void {
+  if (useUIStore.getState().uiMode === 'expert') openFlowTarget(BACKGROUND_HARMONICS_TARGET)
+  else openFlowTargetInPlace(BACKGROUND_HARMONICS_TARGET)
+}
+
 /** The site coordinate field (D01; UI contract rule 4): Guided, a drawer over
  *  the Project & site card; Expert, the horizon panel. */
 export const SITE_ANCHOR_TARGET: FlowTarget = {
