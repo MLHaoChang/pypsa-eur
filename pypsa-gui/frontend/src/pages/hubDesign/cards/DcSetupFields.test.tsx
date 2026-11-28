@@ -7,6 +7,7 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DcBackupArchFields, DcLoadFields } from './DcSetupFields'
+import { nk } from '../../../utils/queryKeys'
 
 const campus = vi.hoisted(() => ({ setDcLoad: vi.fn() }))
 vi.mock('../../../api/campusElectrical', async () => {
@@ -21,8 +22,8 @@ vi.mock('../../../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => u
 const SPEC = { pue_at_design: 1.3, critical_share: 0.75, architecture: 'ac', backup: { mode: 'genset' } }
 const refusal = (data: unknown) => ({ response: { status: 422, data: { detail: data } } })
 
-function renderIt(ui_: React.ReactElement) {
-  return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui_}</QueryClientProvider>)
+function renderIt(ui_: React.ReactElement, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+  return render(<QueryClientProvider client={client}>{ui_}</QueryClientProvider>)
 }
 
 beforeEach(() => {
@@ -131,5 +132,39 @@ describe('DC set-up fields: states UX asked for', () => {
     expect((screen.getByLabelText('Power architecture') as HTMLSelectElement).disabled).toBe(true)
     await userEvent.click(screen.getByRole('button', { name: 'Hybrid' }))
     expect(campus.setDcLoad).not.toHaveBeenCalled()
+  })
+})
+
+describe('DC set-up fields: the values sent and the refresh after a save', () => {
+  it.each([['90', 0.9], ['75.5', 0.755]])('sends a critical share of %s %% as the fraction %s', async (typed, fraction) => {
+    renderIt(<DcLoadFields />)
+    const share = await screen.findByLabelText('Critical share (%)')
+    await userEvent.clear(share)
+    await userEvent.type(share, typed)
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(campus.setDcLoad).toHaveBeenCalledWith('Site A', { critical_share: fraction }))
+  })
+
+  it('refreshes the stored set-up and the results after a save', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const seen: unknown[] = []
+    const real = client.invalidateQueries.bind(client)
+    client.invalidateQueries = ((f: { queryKey: unknown }) => { seen.push(f.queryKey); return real(f as never) }) as never
+    renderIt(<DcBackupArchFields />, client)
+    await userEvent.selectOptions(await screen.findByLabelText('Power architecture'), 'dc_800v')
+    await waitFor(() => expect(campus.setDcLoad).toHaveBeenCalled())
+    await waitFor(() => expect(seen).toContainEqual(nk('Site A', 'adequacy', 'eh_template')))
+    expect(seen).toContainEqual(nk('Site A', 'results'))
+  })
+})
+
+describe('DC set-up fields: a PUE that is not a finite number', () => {
+  it('refuses Infinity before sending', async () => {
+    renderIt(<DcLoadFields />)
+    const pue = await screen.findByLabelText('PUE at design')
+    await userEvent.clear(pue)
+    await userEvent.type(pue, 'Infinity')
+    expect(screen.getByTestId('dc-load-invalid').textContent).toContain('PUE at design: enter 1 or more.')
+    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
   })
 })

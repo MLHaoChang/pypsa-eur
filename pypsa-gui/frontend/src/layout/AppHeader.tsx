@@ -1,6 +1,6 @@
 import { Play, Zap, Search, Loader, PanelRightClose, PanelRightOpen, Undo2, Save, Check, Command, LayoutGrid } from 'lucide-react'
 import { useOpenProjectIsStudy, useOpenProjectKindPending } from '../hooks/useOpenProjectKind'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useSimulationStore, appLog } from '../store/simulationStore'
 import { networkApi } from '../api/network'
@@ -115,6 +115,13 @@ function TypeIcon({ type }: { type: ResultType }) {
 }
 
 // ── AppHeader ──────────────────────────────────────────────────────────────────
+/** What an undo refreshes: the network reads, and the data-centre set-up (PUE, critical share, backup mode,
+ *  architecture), which an undo step restores in the project's marker. */
+export function invalidateAfterUndo(qc: QueryClient, keys: readonly string[], project: string | null): void {
+  keys.forEach(k => qc.invalidateQueries({ queryKey: nk(project, k) }))
+  qc.invalidateQueries({ queryKey: nk(project, 'adequacy', 'eh_template') })
+}
+
 /** The undo mutation's error copy, or `null` to say nothing.
  *
  * A 409 here is a structured refusal the axios interceptor has already
@@ -364,7 +371,7 @@ export default function AppHeader() {
     mutationFn: networkApi.undo,
     onSuccess: (data) => {
       const proj = useUIStore.getState().currentProject
-      ALL_NETWORK_KEYS.forEach(k => queryClient.invalidateQueries({ queryKey: nk(proj, k) }))
+      invalidateAfterUndo(queryClient, ALL_NETWORK_KEYS, proj)
       toast.success(`Undone · ${data.remaining} step${data.remaining !== 1 ? 's' : ''} left`)
     },
     // The interceptor already toasts a structured refusal's own sentence

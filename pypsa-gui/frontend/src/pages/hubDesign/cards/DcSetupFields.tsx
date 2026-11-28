@@ -92,7 +92,7 @@ export function DcLoadFields() {
     return out
   }
   const next = patch()
-  const pueBad = pue !== null && !(Number(pue) >= 1)
+  const pueBad = pue !== null && !(Number(pue) >= 1 && Number.isFinite(Number(pue)))
   const shareBad = share !== null && !(Number(share) > 0 && Number(share) <= 100)
   const bad = pueBad || shareBad
   return (
