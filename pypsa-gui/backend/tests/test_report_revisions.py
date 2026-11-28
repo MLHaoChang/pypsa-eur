@@ -1186,7 +1186,11 @@ def test_a_comment_at_the_latest_digest_is_stored(pdir):
 
 def _report_files(pdir) -> dict[str, bytes]:
     root = pdir / "reports" / RID
-    return {str(f.relative_to(root)): f.read_bytes() for f in sorted(root.rglob("*")) if f.is_file()}
+    return {
+        str(f.relative_to(root)): f.read_bytes()
+        for f in sorted(root.rglob("*"))
+        if f.is_file()
+    }
 
 
 def test_a_comment_at_an_older_digest_is_refused_and_writes_nothing(pdir):

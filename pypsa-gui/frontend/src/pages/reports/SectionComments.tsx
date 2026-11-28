@@ -32,8 +32,13 @@ function snippet(text: string): string {
   return flat.length > 40 ? `${flat.slice(0, 40)}…` : flat
 }
 
-function tableLabel(doc: ReportDocument, tableId: string): string {
-  return `Table · ${doc.tables[tableId]?.caption || tableId}`
+/** "Table · <caption>", or "Table N" (its order among the section's tables) without one. */
+function tableLabel(section: Section, doc: ReportDocument, tableId: string): string {
+  const caption = doc.tables[tableId]?.caption
+  if (caption) return `Table · ${caption}`
+  const ids = [...new Set(section.blocks.flatMap(b => (b.type === 'table_ref' ? [b.table_id] : [])))]
+  const n = ids.indexOf(tableId)
+  return n >= 0 ? `Table ${n + 1}` : 'Table'
 }
 
 /** The parts of a section a revision can edit, in order, with their labels. */
@@ -52,7 +57,7 @@ export function commentableParts(section: Section, doc: ReportDocument): Comment
         anchor: { section_id: section.section_id, block_index: i } })
     } else if (b.type === 'table_ref' && doc.tables[b.table_id]
       && !parts.some(p => p.anchor.table_id === b.table_id)) {
-      parts.push({ key: `t${b.table_id}`, label: tableLabel(doc, b.table_id),
+      parts.push({ key: `t${b.table_id}`, label: tableLabel(section, doc, b.table_id),
         anchor: { section_id: section.section_id, table_id: b.table_id } })
     }
   })
@@ -61,7 +66,7 @@ export function commentableParts(section: Section, doc: ReportDocument): Comment
 
 /** A comment's anchor in words, read against the shown version. */
 export function anchorWords(anchor: CommentAnchor, section: Section, doc: ReportDocument): string {
-  if (anchor.table_id) return tableLabel(doc, anchor.table_id)
+  if (anchor.table_id) return tableLabel(section, doc, anchor.table_id)
   if (anchor.block_index == null) return 'Whole section'
   const block = section.blocks[anchor.block_index]
   const nth = (type: Block['type']) =>
@@ -121,7 +126,7 @@ function CommentRow({
       <div className="flex items-center gap-2 text-[10.5px] text-muted">
         <span className="text-text font-medium">{anchorWords(c.anchor, section, doc)}</span>
         <StatusTag c={c} />
-        <span>{[c.created_by, c.created_at.slice(0, 10)].filter(Boolean).join(' · ')}</span>
+        <span>{[mine ? 'You' : c.created_by, c.created_at.slice(0, 10)].filter(Boolean).join(' · ')}</span>
         {mine && c.status === 'open' && !confirming && (
           <button
             type="button"

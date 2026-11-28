@@ -181,3 +181,17 @@ describe('SectionComments — list and withdraw', () => {
     expect((await screen.findByTestId('comment-row-refusal')).textContent).toBe(COMMENT_REFUSAL_WORDS[kind])
   })
 })
+
+describe('SectionComments — labels (UX 35)', () => {
+  it('names a table without a caption by its order, never its id', () => {
+    const doc = { ...DOC, tables: { ...DOC.tables, caps: { ...DOC.tables.caps, caption: null } } }
+    expect(commentableParts(SECTION, doc).at(-1)!.label).toBe('Table 1')
+  })
+
+  it('names my own comments "You"', () => {
+    renderCard({ comments: [comment(), comment({ comment_id: 'c2', created_by: 'other@example.com' })] })
+    const rows = screen.getAllByTestId('report-comment')
+    expect(rows[0].textContent).toContain('You · 2026-11-27')
+    expect(rows[1].textContent).toContain('other@example.com · 2026-11-27')
+  })
+})
