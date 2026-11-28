@@ -3430,8 +3430,9 @@ def get_eh_reference_design():
     """
     from services.adequacy.eh_report import eh_reference_design_http_payload
 
+    record = get_eh_study()
     body, status = eh_reference_design_http_payload(
-        _state, _state.get("eh_study"))
+        _state, record if isinstance(record, dict) else None)
     if status == 204:
         return Response(status_code=204)
     return body

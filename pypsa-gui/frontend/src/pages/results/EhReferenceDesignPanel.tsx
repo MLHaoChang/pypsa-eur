@@ -1155,6 +1155,9 @@ export function EhReferenceDesignPanel() {
   // later foreground solve has cleared it (the route serves the same fallback),
   // so the export survives a later solve (TE2E-16).
   const storedReport = running ? null : report
+  // The export route's own copy: it says whether this is the record's copy.
+  const exportMeta = running ? null
+    : (reportData ?? null) as EhReferenceDesignReport | null
   const hasReport = report != null
   useEffect(() => {
     if (!open || !hasReport || !scrollToReport.current) return
@@ -1677,6 +1680,13 @@ export function EhReferenceDesignPanel() {
                     `eh-reference-design-${storedReport.archetype}.csv`,
                     REPORT_SUMMARY_CSV_HEADER, reportSummaryCsvRows(storedReport))}
                 />
+                {exportMeta?.stale && (
+                  <span className="text-[10px] text-warn" data-testid="eh-report-stale">
+                    From the last study run; a later solve replaced the stored
+                    report{exportMeta.edited_since_study ? ' and the network has been edited since' : ''}.
+                    The JSON file says so too.
+                  </span>
+                )}
                 {exportError && (
                   <span className="text-[10px] text-danger" data-testid="eh-report-json-error">
                     {exportError}

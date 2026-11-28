@@ -1181,6 +1181,25 @@ describe('P18 — pipeline table and whole-report export', () => {
       .toBe(false)
   })
 
+  it('says the export is the last run when a later solve cleared the stored report', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(
+      { ...WITH_PIPE, stale: true, edited_since_study: true } as never)
+    await openPanel()
+    const note = await screen.findByTestId('eh-report-stale')
+    expect(note.textContent).toMatch(/later solve replaced the stored report/)
+    expect(note.textContent).toMatch(/edited since/)
+  })
+
+  it('shows no stale note while the stored report is present', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(
+      { ...WITH_PIPE, stale: false, edited_since_study: false } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report-json')
+    expect(screen.queryByTestId('eh-report-stale')).toBeNull()
+  })
+
   it('says so if the stored report vanished between render and click', async () => {
     done()
     vi.mocked(resultsApi.getEhReferenceDesign)
