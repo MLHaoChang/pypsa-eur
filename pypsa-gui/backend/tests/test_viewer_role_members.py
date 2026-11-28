@@ -388,7 +388,7 @@ def _add_child(world, creator_id):
 
 
 def test_can_manage_members_for_every_role(world, seeded_identity):
-    from db.models import Project, User
+    from db.models import Project
 
     admin = uuid.UUID(str(seeded_identity["user_id"]))
     # Org admin who created the root: may manage; viewer, editor may not.

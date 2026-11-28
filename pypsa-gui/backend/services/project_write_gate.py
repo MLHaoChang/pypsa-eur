@@ -60,7 +60,9 @@ def message(owner_email: str | None = None) -> str:
 
 def refusal(owner_email: str | None = None) -> HTTPException:
     # The kind is spelled out: the tool-error manifest test derives kinds from literals.
-    return HTTPException(403, {"error_kind": "project_view_only", "message": message(owner_email)})
+    return HTTPException(
+        403, {"error_kind": "project_view_only", "message": message(owner_email)}
+    )
 
 
 def require_writable(db: DBSession, user: User | None, project: Project | None) -> None:
