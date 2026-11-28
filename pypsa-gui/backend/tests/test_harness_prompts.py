@@ -6,7 +6,8 @@ prompt is cached by prefix and the default prompt is pinned by hash
 hashes were captured from the constants BEFORE the move, on 2026-10-05
 (commit 43b36fb), for every fragment and every half — not just the six the
 older test pins. The stance/chaining pins were updated for the approved
-companion navigation guidance in master b8bc079f (PR 113); all other hashes
+companion navigation guidance in master b8bc079f (PR 113), and the style pin
+for the plain-names line (expert-catalogue 05, RAW-NAMES-1); all other hashes
 remain the pre-move values.
 """
 from __future__ import annotations
@@ -20,7 +21,7 @@ EXPECTED_SHA256 = {
     "_BASE_IDENTITY_CHAINING": "4c8f6574926078a5fb9639e88d19eb510a9b6445e6c6b59f9925de50965ca1f7",
     "_BASE_IDENTITY": "aa4112c6f2a69e05304e044f4ed4c413545bd32ca9f76acd784282a1c10b12d2",
     "_CONFIRMATION_CARD_CONTRACT_TEMPLATE": "b471392537b952c84d95d7af7b379c938ac290c933138e693a145a1fbd007eb9",
-    "_STYLE_GUIDANCE": "c31b98f1ea587f1d77e644a5fe721afce4316155b950d6c479c002f120a6912b",
+    "_STYLE_GUIDANCE": "d693bdff574a4b296149dfbed73547c405ac7f625bc6e0383880e0061b6f9729",
     "_ASSISTANT_STANCE_FACTS": "18137511a7024922e0c648edc3110c39d09621d8fcf3ad1b458ee8374b320cb0",
     "_ASSISTANT_STANCE_CHAINING": "c98f5e856e5325af0d70194ba1d1656cde0c0c3ece50e4c13f4032f81e5fc723",
     "_ASSISTANT_STANCE": "7f7ad3efbd93136d9ea17fad812d804d4d2b8dce6f104fa68d196acf9f56ae3d",

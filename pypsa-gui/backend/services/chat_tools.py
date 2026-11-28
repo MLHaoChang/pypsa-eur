@@ -9559,6 +9559,17 @@ from harness.catalogue import SCHEMA_FRAGMENTS as _SCHEMA_FRAGMENTS  # noqa: E40
 _FRAGMENT_LOCK_GATED = _DISPATCH_FRAGMENTS.merge(
     DISPATCHERS, PRE_DISPATCH_VALIDATORS, _SCHEMA_FRAGMENTS)
 
+# Expert catalogue 05 (RAW-NAMES-1): the generic write tools answer with each
+# column's plain name and open a refusal about one with it
+# (`services/chat_plain_names.py`). Wrapped before the gates, so a gate's own
+# refusal is passed on as it is.
+from services import chat_plain_names as _chat_plain_names  # noqa: E402
+
+DISPATCHERS.update({
+    _name: _chat_plain_names.with_plain_names(DISPATCHERS[_name], columns=_cols)
+    for _name, _cols in _chat_plain_names.COLUMNS.items()
+})
+
 # Moved families keep their `chat_tools.<name>` attribute for in-process callers.
 from services.chat_dispatchers.report_templates import (  # noqa: E402,F401
     get_report_template, list_report_templates, propose_report_mapping,

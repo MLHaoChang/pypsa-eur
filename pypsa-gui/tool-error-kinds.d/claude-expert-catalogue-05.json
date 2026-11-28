@@ -1,0 +1,4 @@
+{"kinds": {
+  "unknown_parameter": {"surface": "inline", "why": "open_parameter was given an entry id that is neither a catalogue entry's id nor one of its former ids. Nothing opened; the assistant calls find_parameter for the id."},
+  "invalid_parameter_filter": {"surface": "inline", "why": "find_parameter was given an asset type or function id the catalogue does not know. Nothing was searched; the assistant retries without the filter or with an id the message lists."}
+}}

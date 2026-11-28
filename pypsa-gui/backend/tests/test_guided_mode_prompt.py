@@ -25,6 +25,8 @@ Two invariants carry the design:
     exactly that change, rather than stripped in the test. PR 113
     (master b8bc079f) similarly added companion navigation guidance to the
     stance paragraph; only that paragraph was updated from master.
+    Expert-catalogue 05 adds one plain-name sentence to the style guidance;
+    both fixtures were re-recorded for exactly that sentence.
 """
 from __future__ import annotations
 
