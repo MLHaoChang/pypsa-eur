@@ -122,7 +122,9 @@ def wait_for_job(job_id: str, timeout_seconds: float = 20) -> dict:
             with session._lock:
                 session.job_wait_progress = {"job_id": job_id, "status": job["status"], "position": job.get("position")}
         if terminal or cancelled or time.monotonic() >= deadline:
+            outcome, warnings = ja.queue_outcome(job)
             return run_lifecycle.with_triage({"job": job, "terminal": terminal, "completed": job["status"] == "completed",
+                    "outcome": outcome, "warnings": warnings,
                     "timed_out": not terminal and not cancelled,
                     "wait_cancelled": cancelled, "waited_seconds": round(time.monotonic() - started, 3),
                     "note": "Cancelling this wait does not abort the job; use solve_queue_abort to stop it."}, job_id)
