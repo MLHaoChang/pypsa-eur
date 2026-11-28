@@ -436,3 +436,26 @@ def test_an_error_without_a_message_is_named_by_its_type(drafted, monkeypatch):
     assert ce.run(drafted, SETTINGS)["results"]["harmonic_emission"] == {
         "error": "RuntimeError"
     }
+
+
+def test_a_store_unreadable_at_run_time_reads_unknown_and_stale(drafted):
+    _put(drafted)
+    (ce.campus_dir(drafted) / ce.BACKGROUND_DIR / ce.BACKGROUND_DATA).write_bytes(
+        b"order,u_h_pct_p95\n3,9\n"
+    )
+    emission = _run(drafted)
+    assert emission["background"]["status"] == "unusable"
+    assert "cannot be read" in emission["background"]["reason"]
+    (row,) = _with_bg(emission)
+    assert row["verdict"] == "unknown" and "cannot be read" in row["note"]
+    used = json.loads(
+        (ce.campus_dir(drafted) / "run" / ce.BACKGROUND_USED_FILE).read_text()
+    )
+    assert used["record_sha256"] == "unreadable"
+    assert ce.get_state(drafted)["stale"] is True
+
+
+def test_the_view_says_when_it_was_uploaded(drafted):
+    got = _put(drafted)
+    assert got["uploaded_at"].startswith("20") and got["measured_on"] == "2026-10-03"
+    assert ce.get_background(drafted)["uploaded_at"] == got["uploaded_at"]
