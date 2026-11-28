@@ -6,7 +6,7 @@
   "reason": "Chat finds parameters and quotes the start of each one's guide, but cannot open a whole guide page or the pages for asset types, groups and functions. Open them in the parameter guide.",
   "page": "Parameter guide",
   "panel": null,
-  "keywords": ["catalogue", "glossary", "wiki"],
+  "keywords": ["catalogue", "guide", "glossary", "wiki"],
   "routes": [["GET", "/api/catalogue/guide/{guide_id}"], ["GET", "/api/catalogue/guide/{rest:path}"]]
  }]
 }

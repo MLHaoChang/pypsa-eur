@@ -603,6 +603,15 @@ def _asks_about_range_flags(words: set[str]) -> bool:
     return 'implausible' in words or ('range' in words and bool(words & _RANGE_FLAG_PAIRS))
 
 
+# The parameter guide entry answers only for a guide PAGE: finding a parameter or its
+# catalogue entry is find_parameter's (expert-catalogue 05), so bare `catalogue` is not enough.
+_GUIDE_PAGE_PHRASE = re.compile(r'\b(parameter|catalogue) guide\b|\bguide pages?\b|\bglossary\b|\bwiki\b')
+
+
+def _asks_for_a_guide_page(goal: str) -> bool:
+    return bool(_GUIDE_PAGE_PHRASE.search(' '.join(re.findall(r'[a-z0-9]+', goal.lower()))))
+
+
 def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
 
@@ -621,6 +630,8 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
             continue
         if entry['id'] == 'import_range_flags' and not _asks_about_range_flags(words):
+            continue
+        if entry['id'] == 'parameter_catalogue' and not _asks_for_a_guide_page(goal):
             continue
         hits = len(words & entry['keywords'])
         if hits:

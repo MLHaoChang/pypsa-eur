@@ -506,12 +506,60 @@ _PROFILE_FIELDS = ("p_set", "q_set", "p_max_pu", "p_min_pu", "e_max_pu", "e_min_
                    "inflow", "marginal_cost", "efficiency")
 
 
+def site_equipment_on(n, bus: str, links: set[str]) -> list[str]:
+    """What else sits on a grid-side bus besides the import Links (``links``):
+    loads, stores, storage, another Link, a Line or a Transformer. Empty: the
+    bus is the grid's alone, so a generator on it is grid supply, never an
+    asset of the site (GK A 33 S2). The one rule section 5's site assets and
+    the report's sizing both read (issue template-e2e 20, GK A 40)."""
+    found: list[str] = []
+    for word, table in (("load", n.loads), ("store", n.stores),
+                        ("storage unit", n.storage_units)):
+        if not table.empty and "bus" in table.columns:
+            found += [f"{word} {x}" for x in table.index[table["bus"].astype(str) == bus]]
+    for word, table in (("link", n.links), ("line", n.lines), ("transformer", n.transformers)):
+        if table.empty:
+            continue
+        # Every port: a multi-port Link can draw from the bus on bus2, bus3...
+        ports = [c for c in table.columns if c.startswith("bus") and c[3:].isdigit()]
+        ends = table[ports].astype(str).eq(bus).any(axis=1)
+        found += [f"{word} {x}" for x in table.index[ends]
+                  if not (word == "link" and (str(x) in links or _export_only(n, str(x), bus)))]
+    return found
+
+
+def _export_only(n, link: str, bus: str) -> bool:
+    """A Link that only delivers INTO ``bus``: an export to the grid, which
+    carries no grid power into the site. ``bus`` is its ``bus1`` and on no
+    other port, and it never reverses or draws: ``p_min_pu`` not below 0 and
+    ``efficiency`` above 0, static and in their series (GK A 33). Called only
+    for a Link that touches ``bus`` (`site_equipment_on`), so a Link with
+    ``bus`` on no port never reaches the ``bus1`` test."""
+    row = n.links.loc[link]
+    ports = [c for c in n.links.columns if c.startswith("bus") and c[3:].isdigit()]
+    if str(row["bus1"]) != bus or any(
+            str(row[c]) == bus for c in ports if c != "bus1"):
+        return False
+    for attr, ok in (("p_min_pu", lambda v: v >= 0), ("efficiency", lambda v: v > 0)):
+        values = [float(row.get(attr, 0.0 if attr == "p_min_pu" else 1.0))]
+        series = getattr(n.links_t, attr, None)
+        if series is not None and link in series.columns:
+            values += [float(series[link].min())]
+        if not all(ok(v) for v in values):
+            return False
+    return True
+
+
 def _site_assets(n, imports, connection) -> list[tuple[str, str]]:
     """``(class, name)`` of every asset of the site, in table order: the one
     set the asset count and section 5's list both come from. The supply behind
     the fence (a market Generator on an import Link's grid side) and the
-    connection's own Links are the connection's, not assets of the site."""
-    grid_side = {str(n.links.at[i, "bus0"]) for i in imports if i in n.links.index}
+    connection's own Links are the connection's, not assets of the site. A
+    grid-side bus that also holds site equipment keeps its generators, as the
+    report counts them (`site_equipment_on`)."""
+    links = set(imports)
+    grid_side = {bus for bus in (str(n.links.at[i, "bus0"]) for i in imports if i in n.links.index)
+                 if not site_equipment_on(n, bus, links)}
     out: list[tuple[str, str]] = []
     for klass, table, _field, _stock in _ASSET_TABLES:
         df = getattr(n, table)

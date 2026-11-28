@@ -3,7 +3,7 @@
 
 # 50 — "Run the solve" does not show the solve queue's location refusal
 
-Status: in-review (PR open)
+Status: done (#2116; deferred journey step and two GK notes: template-e2e 55)
 Owner: unassigned
 Size: S
 Follows: 48 (PR #2099; raised by GK B3 (7) as a non-blocking follow-up)

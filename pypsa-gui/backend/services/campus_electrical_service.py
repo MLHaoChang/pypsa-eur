@@ -2922,7 +2922,7 @@ def put_background(project, data: bytes, source: str, measured_on: str, filename
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
             "error_kind": "campus_background_invalid",
-            "message": "Measured on: enter a date (YYYY-MM-DD)",
+            "message": "Measured on: enter the measurement date.",
             "field": "measured_on",
         }) from exc
     d = _background_dir(project)

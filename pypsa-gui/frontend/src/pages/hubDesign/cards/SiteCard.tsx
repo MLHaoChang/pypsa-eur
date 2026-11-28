@@ -22,7 +22,8 @@ import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStud
 import { Term, type TermKey } from '../shared/Term'
 import { useConnectionLimit, useEnergization, useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 import { displayName } from '../../../utils/displayName'
-import { openConnectionLimitEditor } from '../../../layout/flowNavigation'
+import { openBackgroundHarmonicsEditor, openConnectionLimitEditor } from '../../../layout/flowNavigation'
+import { BackgroundHarmonicsSummary } from '../../../components/gridReadiness/BackgroundHarmonicsRow'
 import { useCapacityUnit, useImportLinks, useStagedConnection } from '../../../components/gridReadiness/ConnectionLimits'
 import type { Link } from '../../../api/types'
 import type { FlowEnergization } from '../../../api/flow'
@@ -271,6 +272,7 @@ export function SiteCard() {
           <ul className="flex flex-col gap-2">
             {ROW_META.map(m => <SiteRow key={m.k} {...m} row={rows[m.k]} liveStudy={liveStudy} />)}
             {archetype !== 'off_grid' && <ConnectionLimitRows liveStudy={liveStudy} />}
+            {archetype !== 'off_grid' && <BackgroundHarmonicsSummary liveStudy={liveStudy} onEdit={openBackgroundHarmonicsEditor} />}
           </ul>
         ) : (
           isError ? (

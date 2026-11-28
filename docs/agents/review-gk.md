@@ -301,6 +301,8 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A sizing or loop runner that reports a cost derived from the objective reverses the objective scale the way `run_simulation` does (`_rescale_results_for_objective`), with a test under auto scale and a user scale ≠ 1 (#1466 A2-1, GK A (27)).
 - A per-unit LP share whose exact form is a ratio of variables uses the share over the fixed units only (conservative) and gives extendable units the aggregate row only. The screen still judges them per unit, and the facts name the gap (#1486 R1, GK A (27)).
 - Loss data from an autotransformer source, applied to a unit whose winding type is unknown, is scaled by the co-ratio, states "autotransformer assumed" and discloses the two-winding multiple (#1500 C1, GK A (27)).
+- A route that writes to a project's live network matches `ctx.loaded_project == proj.name` exactly. The `in (None, name)` form is for reads only (#2136 M1, GK A (40)).
+- A refusal that guards a project's writes against a running study checks that project's own resident context (`get_context(registry_key)`), not only the active one (#2091 delete, #2136 M2, GK A (40)).
 
 ## Standing rulings (GK B 59, recorded 2026-11-17)
 
@@ -455,3 +457,20 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - The splice-place pin excludes only the keys of appended fragments (FRAG-APPEND-1, #2121).
 - A plan-named move slice over about 1,500 raw lines was accepted (#2109, about 2,100 lines, almost all verbatim move), because splitting would only add re-OK rounds. Noted for the owner (FRAG-SIZE-1).
 - A frontend source scan's exemption list must be exact (toEqual over the computed set), never arrayContaining (SCAN-EXACT-1, #2106 PHRASE_GAPS).
+
+## Standing rulings (GK A (39), recorded 2026-11-28)
+
+- A step sent to N shared plant controllers is ΔΣM/M_k on each controller's reference. Docs say "same reference MW", never "same MW" (GK A (39) ruling 1).
+- A guard the generated script runs (`SystemExit`) gets a test that executes the script's own statements with a fake `psspy`, not a string match (#2072 M1).
+- A pin of generated pack bytes or `data_hash` that differs between CI and local becomes a relative pin plus a report-level pin computed on master (#2062).
+
+## Standing rulings (GK B (74), recorded 2026-11-28)
+
+- AA-V1-CHANGE-1: basis prose that names the same quantity, with id, metric, op and severity unchanged and no snapshot text, is not a v1 definition change (#2074).
+- AA 28: new answers emit `/2`; stored records emit and replay as `/1` with the snapshot byte-identical. Listing `/1` in `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES` also enables `/2`. STRIP-GATE-1 gates follow the emitted version.
+- Queue job outcomes: a queue `cancelled` is confirmed only for solve, gridspine, profile_gen or never-started jobs. Blender scene and campus jobs read `cancel_requested`. A refused job reads failed / `job_refused`; `denied` is reserved for `DENY_MODULES`.
+- MATPOWER export: a completed export with `counts.not_carried` is model-visible, and the tool line is AA04-P11. A file whose carried field changed reads `uncertain` / `not_as_network`.
+- Metric ledger: the tolerance string states what the oracle asserts. `exact` needs `==`, and `ulp:` is not allowed. The pin resolver checks the import module and counts a constant only as the whole `rel=` or `abs=` argument or in an `abs(a-b) <= bound`. A stated limit is not a per-metric tolerance.
+- Schema fragments import only `catalogue_base`; needed constants are inlined with an equality-pin test.
+- AA 09 S3: per-entity source-digest staleness is accepted instead of `network_revision`. A refused constraint is not kept in `pending_scope`.
+- Process: never remove or swap a worktree while a background run uses it. Run `tests/assurance_acceptance` in 4 to 6 chunks. Post verdicts on the PR even when `send_message` fails.
