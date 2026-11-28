@@ -29,6 +29,6 @@ describe('CampusHarmonicEmissionSection', () => {
     expect(backgroundText({ status: 'used', citation: 'utility measurement of 2026-10-03' }))
       .toBe('Background: utility measurement of 2026-10-03, used.')
     expect(backgroundText({ status: 'unusable', reason: 'it was measured at another bus' }))
-      .toBe('Background: not used: it was measured at another bus.')
+      .toBe('Background not used: it was measured at another bus.')
   })
 })

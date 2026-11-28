@@ -19,6 +19,12 @@ export function storedLine(b: Extract<BackgroundHarmonics, { has_background: tru
   return parts.join(' · ')
 }
 
+/** Guided calls the PCC the "connection point", as its Site card does. */
+function useRowTitle(): string {
+  const guided = useUIStore(s => s.uiMode === 'guided')
+  return `Background harmonics at the ${guided ? 'connection point' : 'PCC'}`
+}
+
 export default function BackgroundHarmonicsRow() {
   const project = useUIStore(s => s.currentProject) ?? ''
   const qc = useQueryClient()
@@ -51,7 +57,7 @@ export default function BackgroundHarmonicsRow() {
   const busy = upload.isPending || remove.isPending
   return (
     <li data-testid="connection-limit-background_harmonics" className="text-[12px]">
-      <span className="font-semibold">Background harmonics at the PCC</span>
+      <span className="font-semibold">{useRowTitle()}</span>
       {stored.isError ? (
         <span className="block text-warn" data-testid="background-error">
           Background harmonics: the stored measurement could not be read.</span>
@@ -114,13 +120,14 @@ export function BackgroundHarmonicsSummary({ onEdit, liveStudy }: { onEdit: () =
     enabled: !!project, retry: false })
   const state = useQuery({ queryKey: STATE_KEY(project), queryFn: () => campusApi.state(project),
     enabled: !!project, retry: false })
+  const title = useRowTitle()
   if (stored.isError || stored.data == null) return null
   const b = stored.data
   const hasRun = state.data?.results != null
   return (
     <li data-testid="hub-site-background-harmonics" className="flex flex-wrap items-center gap-2 text-[12px]">
       <span className="flex-1 min-w-[16rem]">
-        Background harmonics at the PCC:{' '}
+        {title}:{' '}
         <span className="text-text">{b.has_background ? storedLine(b, hasRun) : 'none'}</span>
         {b.has_background && hasRun && !b.in_latest_run && (
           <span className="block text-warn">Out of date: the background changed after the last run.</span>

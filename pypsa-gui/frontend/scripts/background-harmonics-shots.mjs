@@ -109,7 +109,7 @@ try {
       : r.continue()))
     await page.route(u => u.pathname === `${statePath}/background-harmonics`, r => {
       const m = r.request().method()
-      if (m === 'PUT' && rowNow.putError) return r.fulfill({ status: 422, json: { detail: { message: 'Measured on: enter a date (YYYY-MM-DD)', field: 'measured_on' } } })
+      if (m === 'PUT' && rowNow.putError) return r.fulfill({ status: 413, json: { detail: { message: 'File: larger than 1 MB', field: 'file' } } })
       if (m === 'GET') return r.fulfill({ json: rowNow.bg })
       return r.fulfill({ json: { has_background: false } })
     })

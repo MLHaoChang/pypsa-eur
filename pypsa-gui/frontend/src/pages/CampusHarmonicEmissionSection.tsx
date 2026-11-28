@@ -23,7 +23,7 @@ const verdictOf = (r: HarmonicEmissionRow): Verdict => (r.verdict === 'pass' || 
 /** The background line in words: what the run took, never the status code. */
 export function backgroundText(b: HarmonicBackground): string {
   if (b.status === 'used') return `Background: ${b.citation}, used.`
-  if (b.status === 'unusable') return `Background: not used: ${b.reason}.`
+  if (b.status === 'unusable') return `Background not used: ${b.reason}.`
   return 'Background: none.'
 }
 
@@ -93,7 +93,7 @@ export default function CampusHarmonicEmissionSection({ emission }: { emission: 
                         {fig(r.thd_pct)} · limit {fig(r.thd_limit_pct)}
                       </td>
                       <td className="pr-3 align-top whitespace-nowrap tabular-nums">
-                        {r.worst_order != null ? `h ${r.worst_order}: ` : ''}{fig(r.worst_u_h_pct)} · limit {fig(r.worst_limit_pct)}
+                        {r.worst_order != null ? `order ${r.worst_order}: ` : ''}{fig(r.worst_u_h_pct)} · limit {fig(r.worst_limit_pct)}
                       </td>
                       <td className="align-top">
                         <span data-testid="emission-chip" data-verdict={v}
@@ -112,7 +112,7 @@ export default function CampusHarmonicEmissionSection({ emission }: { emission: 
         <p data-testid="emission-key" className="text-[11px] text-muted">
           Pass: within the limit. Fail: over it. Not judged: an input is missing, so the screen gives no verdict.
         </p>
-        <p className="text-[11px] text-muted">Basis: {emission.label}</p>
+        <p className="text-[11px] text-muted">Basis: {emission.label.split('; ').join('. ')}.</p>
       </div>
     </PageSection>
   )
