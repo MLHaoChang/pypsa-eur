@@ -77,13 +77,13 @@ describe('ask / delegate', () => {
 describe('texts (§5.7, verbatim)', () => {
   it('site fixes', () => {
     expect(siteFixText('grid')).toBe(
-      'On the Site card, the grid connection is missing. Run suggest_eh_setup, then tag the import Link with eh_role = grid_import and the grid-side bus eh_poc = true, explaining each choice before the confirmation.')
+      "On the Site card, the grid connection is missing. Run suggest_eh_setup, then tag the import Link with the Energy Hub role Grid import and mark the grid-side bus as the Grid point of connection, explaining each choice before the confirmation.")
     expect(siteFixText('critical')).toBe(
-      'On the Site card, no critical load is tagged. Propose which buses must stay on (eh_critical = true) and tag them after I confirm.')
+      'On the Site card, no critical load is tagged. Propose which buses must stay on (Critical bus) and tag them after I confirm.')
     expect(siteFixText('strength')).toBe(
-      'On the Site card, grid-strength data is missing. Ask me for the short-circuit level (MVA) at the point of connection and set eh_sk_mva on that bus after I confirm.')
+      "On the Site card, grid-strength data is missing. Ask me for the short-circuit level (MVA) at the point of connection and set it as that bus's Short-circuit level at the connection after I confirm.")
     expect(siteFixText('outage', 4)).toBe(
-      'On the Site card, 4 units have no outage data. List them and ask me for outage rate and repair time per unit, then set outage_rate_value and mttr_hours after I confirm.')
+      'On the Site card, 4 units have no outage data. List them and ask me for outage rate and repair time per unit, then set their Forced-outage rate and Mean time to repair after I confirm.')
   })
 
   it('improve: do uses the first action with its exact JSON arguments', () => {

@@ -49,6 +49,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from harness.providers import live_media
+from services import chat_plain_names
 from services import durable_conversation as dc
 
 ENABLE_ENV = 'PYPSA_GUI_LIVE_SPEECH'
@@ -669,6 +670,7 @@ def redeem_final(
             _remember_spoken(episode_id, utterance_id, {
                 'session_id': ticket['session_id'],
                 'generation': ticket['generation'],
+                'text': text,
             })
     if ticket is None:
         return {
@@ -873,13 +875,18 @@ def queue_answer(
             return 'superseded'
         if ua._DEFAULT.generation(episode_id) != spoken['generation']:
             return 'stale_generation'
+        # Spoken with the plain names the chat shows (expert-catalogue §7.3); a
+        # model name the user said stays as said.
+        said = chat_plain_names.display_plain_names(text, spoken.get('text') or '')
+        if len(said) > live_media.MAX_TTS_TEXT_CHARS:
+            return 'too_long'
         _enqueue(spoken['session_id'], {
             'output_id': uuid.uuid4().hex,
             'answer_id': answer_id,
             'utterance_id': utterance_id,
-            'text': text,
-            'sha256': _sha256(text),
-            'chars': len(text),
+            'text': said,
+            'sha256': _sha256(said),
+            'chars': len(said),
             'generation': spoken['generation'],
             'epoch': epoch,
             'state': 'queued',
@@ -923,7 +930,9 @@ def _output_view(output: dict[str, Any]) -> dict[str, Any]:
 def claim_output(thread_id: str, *, token: str, session_id: str) -> dict[str, Any]:
     """The audio worker takes the next answer to speak, at most once.
 
-    The text is the caption, byte for byte. Its characters are charged to the
+    The text is the caption as the chat shows it: byte for byte, but for
+    backticked model names, which read as their plain names (expert-catalogue
+    spec §7.3). Its characters are charged to the
     session's TTS reservation once, through the same usage record as
     ``report_usage`` (usage id ``tts-<output_id>``; a worker report under that
     id is a duplicate). An answer that would exceed the reservation is not

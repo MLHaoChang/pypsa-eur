@@ -27,6 +27,8 @@
  * not speak.
  */
 
+import { displayPlainNames } from '../catalogue/displayPlainNames'
+
 /** Roughly a paragraph. Past this, spoken output stops being useful. */
 const MAX_SPOKEN_CHARS = 1000
 
@@ -51,6 +53,13 @@ export function isSpeechOutAvailable(): boolean {
  * REPLACED by a mention of themselves rather than read out. Someone who wants
  * the table can look at it — it is on screen, four inches from their ear.
  */
+/** An assistant reply as spoken: the plain names the chat shows for its
+ *  backticked model names (expert-catalogue spec §7.3), then the reduction
+ *  below. `userText`: the user's message the reply answers. */
+export function assistantSpeech(reply: string, userText?: string): string {
+  return plainTextForSpeech(displayPlainNames(reply, { userText }))
+}
+
 export function plainTextForSpeech(markdown: string): string {
   let t = markdown ?? ''
 

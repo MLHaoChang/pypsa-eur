@@ -1,0 +1,66 @@
+"""Display replacement on the live-voice TTS path (expert-catalogue spec §7.3).
+
+`chat_plain_names.display_plain_names` on the case table it shares with the
+frontend (`frontend/src/catalogue/displayPlainNames.test.ts`), and a spoken
+checked answer carrying the plain names the chat shows.
+"""
+
+# ruff: noqa: F811 -- imported pytest fixtures
+from __future__ import annotations
+
+import hashlib
+import json
+import pathlib
+
+import pytest
+
+from services import chat_plain_names as P
+from services import live_speech as ls
+from services.asset_schema import lookup
+from tests.test_live_speech_output_lc07 import (  # noqa: F401 — fixtures
+    _checked_frames,
+    _reset,
+    _spoken_turn,
+    transport,
+)
+
+TABLE = json.loads(
+    (
+        pathlib.Path(__file__).parent / "data" / "display_plain_names_cases.json"
+    ).read_text("utf-8")
+)
+
+
+@pytest.mark.parametrize("case", TABLE["cases"], ids=[c["why"] for c in TABLE["cases"]])
+def test_case_table(case):
+    assert P.display_plain_names(case["text"], case.get("user", "")) == case["want"]
+
+
+def test_the_words_are_the_catalogue_lookup():
+    assert P.display_plain_names("`e_nom`") == lookup.plain_name("Store", "e_nom")
+    assert P.display_plain_names("`s_nom`") == lookup.plain_name("Line", "s_nom")
+    assert P.display_plain_names("`p_set`") == lookup.plain_name("Load", "p_set")
+
+
+SPOKEN = "Set `e_nom` to 200 MWh; `p_nom` stays."
+
+
+def test_a_spoken_answer_carries_the_plain_names(transport, monkeypatch):
+    tid, sid, token, _, _ = _spoken_turn(
+        monkeypatch, frames=_checked_frames(SPOKEN), approved=SPOKEN
+    )
+    out = ls.claim_output(tid, token=token, session_id=sid)["output"]
+    said = "Set Energy capacity to 200 MWh; `p_nom` stays."
+    assert out["text"] == said
+    assert out["sha256"] == hashlib.sha256(said.encode("utf-8")).hexdigest()
+    assert out["chars"] == len(said)
+
+
+def test_a_name_the_user_said_is_spoken_as_said(transport, monkeypatch):
+    tid, sid, token, _, _ = _spoken_turn(
+        monkeypatch,
+        frames=_checked_frames(SPOKEN),
+        approved=SPOKEN,
+        text="what is e_nom",
+    )
+    assert ls.claim_output(tid, token=token, session_id=sid)["output"]["text"] == SPOKEN

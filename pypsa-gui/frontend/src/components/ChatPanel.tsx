@@ -1311,6 +1311,13 @@ export async function refreshIfStillCurrent(
 // event bridge (`chat:open-project-picker` / `chat:open-new-project-wizard`)
 // is unchanged and Sidebar needed no edit.
 
+/** The user's message that the reply at `index` answers (the last one before
+ *  it): a model name it names stays raw in the reply (expert-catalogue §7.3). */
+function userTextBefore(messages: ChatMessage[], index = messages.length): string {
+  for (let i = index - 1; i >= 0; i--) if (messages[i].role === 'user') return messages[i].content
+  return ''
+}
+
 /**
  * The three things people need from a message and could not do: take the
  * answer with them, ask again, or fix the question.
@@ -2813,7 +2820,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                 answer_id: approved.answer_id, answer_turn_id: approved.turn_id,
                 origin_project: state.project, receipt: approved.receipt })
               if (speak && useUIStore.getState().assistantSpeakEnabled) {
-                speechOut.speak(speechOut.plainTextForSpeech(state.text))
+                speechOut.speak(speechOut.assistantSpeech(state.text, userTextBefore(useChatStore.getState().messages)))
               }
             })
           } else if (state.requested) {
@@ -2828,9 +2835,9 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         // is cleared by the send itself, and the mute is read live so
         // muting mid-turn takes effect on this answer rather than the next.
         if (!state.strict && voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
-          const last = useChatStore.getState().messages
-            .filter((m) => m.role === 'assistant').slice(-1)[0]
-          if (last) speechOut.speak(speechOut.plainTextForSpeech(last.content))
+          const all = useChatStore.getState().messages
+          const at = all.map((m) => m.role).lastIndexOf('assistant')
+          if (at >= 0) speechOut.speak(speechOut.assistantSpeech(all[at].content, userTextBefore(all, at)))
         }
         voiceTurnRef.current = false
         if (d.usage) {
@@ -3903,7 +3910,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                 text; keep their newlines with pre-wrap so multi-line input and
                 tool tags aren't flattened. */}
             {m.role === 'assistant'
-              ? <ChatMarkdown>{m.content}</ChatMarkdown>
+              ? <ChatMarkdown plainNames={{ userText: userTextBefore(messages, index) }}>{m.content}</ChatMarkdown>
               : m.role === 'user' ? <UserMessageText message={m} />
               : setReceipt ? <ChangeSetReceiptCard receipt={setReceipt} labels={m.change_set_receipt?.labels}
                   reasons={m.change_set_receipt?.reasons} />

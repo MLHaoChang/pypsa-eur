@@ -1,0 +1,56 @@
+{
+ "about": "Display replacement in chat (expert-catalogue spec §7.3), shared by frontend/src/catalogue/displayPlainNames.test.ts (displayPlainNames: the chat text and the browser speech path) and tests/test_display_plain_names.py (services/chat_plain_names.py display_plain_names: the live-voice TTS path). user is the message the text answers. Plain names are the Parameter catalogue's (modelNames.generated.json on the frontend, asset_schema lookup on the server).",
+ "cases": [
+  {
+   "why": "a backticked catalogue name is shown as its plain name",
+   "text": "Set `e_nom` to 200 MWh.",
+   "want": "Set Energy capacity to 200 MWh."
+  },
+  {
+   "why": "a name shared by classes with different plain names stays raw (p_nom: Capacity or Power)",
+   "text": "Raise `p_nom` on the PV array.",
+   "want": "Raise `p_nom` on the PV array."
+  },
+  {
+   "why": "a name the catalogue does not hold stays raw",
+   "text": "Tag the link `grid_import`, and read `p_nom_opt` after the run.",
+   "want": "Tag the link `grid_import`, and read `p_nom_opt` after the run."
+  },
+  {
+   "why": "fenced code is left as written",
+   "text": "Like this:\n```python\nn.stores.loc['h2', 'e_nom'] = 200  # `e_nom`\n```\nThen `e_nom` is set.",
+   "want": "Like this:\n```python\nn.stores.loc['h2', 'e_nom'] = 200  # `e_nom`\n```\nThen Energy capacity is set."
+  },
+  {
+   "why": "a tilde fence is code too",
+   "text": "~~~\n`s_nom`\n~~~",
+   "want": "~~~\n`s_nom`\n~~~"
+  },
+  {
+   "why": "bare prose is never replaced",
+   "text": "The e_nom of the store and its marginal_cost stay.",
+   "want": "The e_nom of the store and its marginal_cost stay."
+  },
+  {
+   "why": "quoted text (often the user's own words) is left as written, up to the blank line",
+   "text": "> You asked about `e_nom`\nand `s_nom`.\n\nHere `e_nom` is 200 MWh.",
+   "want": "> You asked about `e_nom`\nand `s_nom`.\n\nHere Energy capacity is 200 MWh."
+  },
+  {
+   "why": "about the key: a name in the user's message stays raw in the reply, others are replaced",
+   "user": "what is e_nom?",
+   "text": "`e_nom` is the store's size in MWh; a line's size is its `s_nom`.",
+   "want": "`e_nom` is the store's size in MWh; a line's size is its Rating."
+  },
+  {
+   "why": "several tokens in one line",
+   "text": "`e_nom`, `s_nom`, `p_set` and `marginal_cost` are set; `p_nom` is not.",
+   "want": "Energy capacity, Rating, Demand and Running cost are set; `p_nom` is not."
+  },
+  {
+   "why": "only single-backtick spans holding exactly one name",
+   "text": "``e_nom`` and ` s_nom ` and `e_nom = 2` stay.",
+   "want": "``e_nom`` and ` s_nom ` and `e_nom = 2` stay."
+  }
+ ]
+}

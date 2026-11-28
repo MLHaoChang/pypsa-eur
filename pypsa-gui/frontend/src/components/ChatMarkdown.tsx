@@ -17,6 +17,7 @@ import { extractCopyText } from '../utils/chatUi'
 import { guideLinkId } from '../catalogue/guideLink'
 import { approvedChatHref } from '../utils/chatLinks'
 import { openGuide } from '../catalogue/guideStore'
+import { displayPlainNames } from '../catalogue/displayPlainNames'
 
 // Models occasionally include this label inside a Markdown destination rather
 // than outside the link. Repair only a complete authenticated artifact route;
@@ -138,13 +139,16 @@ const reportComponents: Components = {
 // `rehypePlugins` is optional and off by default: the report viewer passes
 // `rehypeMarkUnverified` so audited numbers get their `<mark>` inside the
 // rendered prose (pages/reports/highlightUnverified.ts); chat passes nothing.
+// `plainNames`: the text is an assistant reply; its backticked model names are
+// shown as plain names (expert-catalogue spec §7.3), except one the user's
+// message (`userText`) named. Display only: `children` is not changed.
 export default function ChatMarkdown({
-  children, rehypePlugins, externalLinks = 'text',
-}: { children: string; rehypePlugins?: Options['rehypePlugins']; externalLinks?: 'text' | 'link' }) {
+  children, rehypePlugins, externalLinks = 'text', plainNames,
+}: { children: string; rehypePlugins?: Options['rehypePlugins']; externalLinks?: 'text' | 'link'; plainNames?: { userText?: string } }) {
   return (
     <div className="chat-markdown break-words">
       <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins ?? undefined} components={externalLinks === 'link' ? reportComponents : components} urlTransform={artifactUrlTransform}>
-        {children}
+        {plainNames ? displayPlainNames(children, plainNames) : children}
       </Markdown>
     </div>
   )
