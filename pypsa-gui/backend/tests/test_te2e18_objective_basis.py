@@ -417,3 +417,93 @@ def test_a_malformed_stamp_reads_unknown(raw, monkeypatch):
     assert solve_discount(n) == "unknown"
     n.meta[SOLVE_STRATEGY_META] = "sideways"
     assert _status_with(monkeypatch, n) == ("unknown", None)
+
+
+def test_the_stamp_takes_the_resolved_sclopf_flag(monkeypatch, reset_backend):
+    """GK B M9: set-up decides the stamp's strategy on the SCLOPF flag the solve resolved, not the
+    config's. Today the two never differ on a run that starts: the pre-flight refuses SCLOPF with
+    no branch (`sclopf_no_branches`) and rolling with SCLOPF (`rolling_with_sclopf`). With those
+    checks stubbed, a rolling single-period solve whose SCLOPF falls back to plain LOPF runs
+    rolling, and the stamp must say so: the wiring holds if the pre-flight ever loosens."""
+    from routers.projects import _solver_config_from_dict
+    from services import solver_service as ss
+    from services.pypsa_service import PyPSAService
+    from services.solver.assumptions import SOLVE_BASIS_CAPTURED
+
+    n = T.BUILDERS["eh_h2_hub"]()
+    cfg = dataclasses.replace(
+        _solver_config_from_dict(T.solver_config("eh_h2_hub")),
+        sclopf=True,
+        solve_strategy="rolling",
+    )
+    assert not cfg.multi_investment_periods
+    monkeypatch.setattr(ss, "resolve_branch_outages", lambda *_a, **_k: [])
+    monkeypatch.setattr(ss, "validate_for_run", lambda *_a, **_k: [])
+    seen = {}
+    real = ss._apply_modelling_assumptions
+
+    def spy(*a, **k):
+        seen["sclopf"] = k.get("sclopf", "not passed")
+        restore, captured = real(*a, **k)
+        seen["strategy"] = captured[SOLVE_BASIS_CAPTURED]["strategy"]
+        return restore, captured
+
+    def stop(*_a, **_k):
+        raise RuntimeError("stop after set-up")
+
+    monkeypatch.setattr(ss, "_apply_modelling_assumptions", spy)
+    monkeypatch.setattr(ss._operational, "fallback_refusal", stop)
+    PyPSAService.set_network(n)
+    out = ss.run_simulation(
+        cfg,
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **kw: None,
+    )
+    assert out == ("error", "stop after set-up")
+    assert seen == {"sclopf": False, "strategy": "rolling"}
+
+
+def test_a_commit_without_a_held_basis_leaves_the_stamp():
+    from services.solver.assumptions import (
+        SOLVE_DISCOUNT_META,
+        SOLVE_STRATEGY_META,
+        commit_solve_basis,
+    )
+
+    n = T.BUILDERS["eh_h2_hub"]()
+    n.meta[SOLVE_STRATEGY_META], n.meta[SOLVE_DISCOUNT_META] = "myopic", None
+    commit_solve_basis(n, {})
+    assert (n.meta[SOLVE_STRATEGY_META], n.meta[SOLVE_DISCOUNT_META]) == (
+        "myopic",
+        None,
+    )
+
+
+def test_set_up_without_a_resolved_flag_reads_the_configs_sclopf():
+    """A caller that resolves no SCLOPF flag (the sizing loop) gets the config's: rolling with
+    SCLOPF on runs the full horizon."""
+    *_n, restore, basis = _assumed("eh_h2_hub", sclopf=True, solve_strategy="rolling")
+    restore()
+    assert basis["strategy"] == "full"
+    *_n, restore, basis = _assumed("eh_h2_hub", sclopf=False, solve_strategy="rolling")
+    restore()
+    assert basis["strategy"] == "rolling"
+
+
+def test_no_basis_when_the_network_cannot_be_read(monkeypatch):
+    from routers import simulation
+    from services import study_solve
+
+    def unreadable():
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(
+        simulation.PyPSAService, "get_network", staticmethod(unreadable)
+    )
+    monkeypatch.setattr(study_solve, "fallback", lambda *_a, **_k: None)
+    monkeypatch.setitem(simulation._state, "objective", 1.0e6)
+    st = simulation.get_status()
+    assert (st["objective_basis"], st["objective_discounted_to"]) == (None, None)

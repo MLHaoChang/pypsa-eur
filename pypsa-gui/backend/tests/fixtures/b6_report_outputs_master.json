@@ -121,7 +121,8 @@
   "period_weighting_adjustment_eur": 6.427435437217355e-06,
   "pypsa_gui_objective_scale": 1.0,
   "residual_gap_eur": 0.0,
-  "residual_gap_pct": 0.0
+  "residual_gap_pct": 0.0,
+  "discount": "unknown"
  },
  "periodized_capital_costs": {
   "generators": {
