@@ -71,6 +71,17 @@ def test_backup_reads_the_optimised_capacity_and_falls_back_to_the_entered_one()
     unsolved = _Net([["gas", 2.0, float("nan")]])
     assert backup_mw(unsolved) == 2.0
     assert backup_mw(_Net([])) == 0.0
+    assert backup_mw(_Net([["solar", 1.0, 1.0]])) == 0.0  # no gensets among them
+
+
+def test_backup_is_zero_without_generators_or_carriers():
+    class _Bare:
+        pass
+
+    assert backup_mw(_Bare()) == 0.0
+    no_carrier = _Net([["diesel", 2.0, 2.0]])
+    no_carrier.generators = no_carrier.generators.drop(columns="carrier")
+    assert backup_mw(no_carrier) == 0.0
 
 
 def test_critical_share_needs_a_site_type_and_a_positive_share():

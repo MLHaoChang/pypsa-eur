@@ -51,11 +51,10 @@ def backup_mw(n) -> float:
     """The genset capacity in the design: the gas and diesel Generators' optimised
     capacity, or their entered capacity where the run did not optimise it."""
     gens = getattr(n, "generators", None)
-    if gens is None or gens.empty or "carrier" not in gens.columns:
+    # No Generators, or none with a carrier: no gensets. An empty selection sums to 0.
+    if gens is None or "carrier" not in gens.columns:
         return 0.0
     sel = gens[gens["carrier"].astype(str).isin(BACKUP_CARRIERS)]
-    if sel.empty:
-        return 0.0
     col = "p_nom_opt" if "p_nom_opt" in sel.columns else "p_nom"
     vals = sel[col].fillna(sel["p_nom"]) if col == "p_nom_opt" else sel[col]
     return float(vals.clip(lower=0).sum())
@@ -70,9 +69,7 @@ def lcoe_caveat(value, unit, *, template: dict | None, n) -> str | None:
         return None
     if not value > LCOE_CAVEAT_BOUND_EUR_PER_MWH:
         return None
-    site = _SITE_WORD.get(
-        str((template or {}).get("site_type") or ""), "a site like this"
-    )
+    site = _SITE_WORD.get(str((template or {}).get("site_type")), "a site like this")
     if critical_share(template) is not None and backup_mw(n) > 0:
         return (
             f"{_bound_words()}, high for {site}: the backup kept for the "
