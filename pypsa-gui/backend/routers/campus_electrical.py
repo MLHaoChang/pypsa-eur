@@ -525,6 +525,40 @@ def download_powerfactory_bundle(bundle: str, proj: AuthorizedProject = ProjectA
                              "X-Run-Stale": "true" if stale else "false"})
 
 
+# ── the background voltage harmonics at the PCC (grid-compliance 29) ──
+
+@router.get("/{name}/background-harmonics")
+def get_background_harmonics(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The stored field measurement of the background harmonics at the PCC, if any."""
+    return ce.get_background(_row(proj, db))
+
+
+@router.put("/{name}/background-harmonics")
+async def put_background_harmonics(
+    file: UploadFile = File(...),
+    source: str = Form(""),
+    measured_on: str = Form(""),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """A field measurement (CSV of harmonic order and % of the nominal fundamental) with who measured it and
+    when; checked now against the campus PCC, taken by the next campus run. At most the cap plus one byte is
+    read into memory, so the service refuses anything longer by its length (the server has already spooled the
+    body by then)."""
+    _check_lock(proj, db, user)
+    data = await file.read(ce.MAX_BACKGROUND_BYTES + 1)
+    return await run_in_threadpool(ce.put_background, _row(proj, db), data, source, measured_on, file.filename)
+
+
+@router.delete("/{name}/background-harmonics")
+def delete_background_harmonics(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db),
+                                user: User | None = Depends(optional_user)):
+    """Remove the stored measurement; the next campus run has none."""
+    _check_lock(proj, db, user)
+    return ce.delete_background(_row(proj, db))
+
+
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────
 
 @router.get("/{name}/island")
