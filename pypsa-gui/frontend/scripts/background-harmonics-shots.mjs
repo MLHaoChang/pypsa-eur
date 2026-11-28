@@ -10,7 +10,8 @@
  * the B-template project "Background harmonics shots" when it is missing.
  *
  * Files: gc29b-<mode>-<theme>-<state>.png; input row states `row-empty`, `row-stored`, `row-stale`,
- * `row-error`, `row-remove`; Results states `res-none`, `res-used`, `res-unused`, `res-notcomputed`, `res-error`.
+ * `row-error`, `row-remove`; Guided home (mode guided only) `site-card-empty|stored|stale` (the read line on the
+ * Site card) and `drawer-empty|stored|error` (the field drawer after Edit ›); Results states `res-none`, `res-used`, `res-unused`, `res-notcomputed`, `res-error`.
  *
  * Usage: node scripts/background-harmonics-shots.mjs [outDir]      env: BASE, MODES (guided,expert)
  */
@@ -170,7 +171,35 @@ try {
         await shot(rowLoc(), `row-${key}`)
       })
     }
-    for (const key of Object.keys(RES)) {
+    // Guided's home: the read line on the Site card, and the field drawer Edit › opens (the row alone).
+    const GUIDED = { empty: ROWS.empty, stored: ROWS.stored, stale: ROWS.stale }
+    for (const key of Object.keys(mode === 'guided' ? GUIDED : {})) {
+      await step(`site-card-${key}`, async () => {
+        rowNow = GUIDED[key]; emissionNow = RES.used
+        await reload()
+        await page.evaluate(async () => { const nav = await import('/src/layout/flowNavigation.ts'); nav.showGridReadiness() })
+        await page.getByTestId('hub-site-background-harmonics').waitFor(); await page.waitForTimeout(800)
+        await shot(page.getByTestId('hub-site-readiness'), `site-card-${key}`)
+      })
+    }
+    for (const [key, def] of Object.entries(mode === 'guided' ? { empty: ROWS.empty, stored: ROWS.stored, error: ROWS.error } : {})) {
+      await step(`drawer-${key}`, async () => {
+        rowNow = def; emissionNow = RES.used
+        await reload()
+        await page.evaluate(async () => { const nav = await import('/src/layout/flowNavigation.ts'); nav.showGridReadiness() })
+        await page.getByTestId('hub-site-background-harmonics-edit').click()
+        await rowLoc().waitFor(); await page.waitForTimeout(800)
+        if (def.putError) {
+          await page.locator('#bg-source').fill('Grid operator')
+          await page.locator('#bg-date').fill('2026-10-03')
+          await page.locator('#bg-file').setInputFiles({ name: 'pcc_background.csv', mimeType: 'text/csv', buffer: Buffer.from('order,u_pct\n5,1.2\n7,0.8\n') })
+          await page.getByRole('button', { name: 'Save the measurement' }).click()
+          await page.getByTestId('background-upload-error').waitFor()
+        }
+        await shot(page.getByTestId('field-drawer'), `drawer-${key}`)
+      })
+    }
+    for (const key of Object.keys(process.env.ONLY_NEW ? {} : RES)) {
       await step(`res-${key}`, async () => {
         rowNow = ROWS.stored; emissionNow = RES[key]
         await reload()
