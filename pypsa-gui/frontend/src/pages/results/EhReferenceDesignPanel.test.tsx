@@ -1187,8 +1187,19 @@ describe('P18 — pipeline table and whole-report export', () => {
       { ...WITH_PIPE, stale: true, edited_since_study: true } as never)
     await openPanel()
     const note = await screen.findByTestId('eh-report-stale')
-    expect(note.textContent).toMatch(/later solve replaced the stored report/)
-    expect(note.textContent).toMatch(/edited since/)
+    expect(note.textContent).toMatch(/^Out of date: the network changed after the study ran/)
+    expect(note.className).toMatch(/text-warn/)
+  })
+
+  it('words the not-edited stale export as muted, without the edit warning', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(
+      { ...WITH_PIPE, stale: true, edited_since_study: false } as never)
+    await openPanel()
+    const note = await screen.findByTestId('eh-report-stale')
+    expect(note.textContent).toMatch(/^From the last study run, before the latest solve\./)
+    expect(note.className).toMatch(/text-muted/)
+    expect(note.className).not.toMatch(/text-warn/)
   })
 
   it('shows no stale note while the stored report is present', async () => {

@@ -1681,10 +1681,11 @@ export function EhReferenceDesignPanel() {
                     REPORT_SUMMARY_CSV_HEADER, reportSummaryCsvRows(storedReport))}
                 />
                 {exportMeta?.stale && (
-                  <span className="text-[10px] text-warn" data-testid="eh-report-stale">
-                    From the last study run; a later solve replaced the stored
-                    report{exportMeta.edited_since_study ? ' and the network has been edited since' : ''}.
-                    The JSON file says so too.
+                  <span data-testid="eh-report-stale"
+                    className={`text-[10px] ${exportMeta.edited_since_study ? 'text-warn' : 'text-muted'}`}>
+                    {exportMeta.edited_since_study
+                      ? 'Out of date: the network changed after the study ran. Run the study again for a current export. The JSON file notes this too.'
+                      : 'From the last study run, before the latest solve. The JSON file notes this too.'}
                   </span>
                 )}
                 {exportError && (
