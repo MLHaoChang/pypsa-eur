@@ -1303,8 +1303,8 @@ def _energization_preview(args: dict) -> list[dict]:
         _refuse("energization_invalid_request", "Send {link, period, mw}: the link's name, the period and the MW.")
     try:
         plan = E.plan_period_mw(PyPSAService.get_network(), link, period, args["mw"])
-    except E.EnergizationEditError as exc:
-        _refuse(exc.error_kind, exc.message)
+    except E.EnergizationEditError as exc:  # the writer's typed kind, as the route raises it
+        raise HTTPException(422, {"error_kind": exc.error_kind, "message": exc.message}) from exc
     when = "" if plan["period"] == E.ALL else f" for {plan['period']}"
     return [{"component_class": "Settings", "name": link, "field": f"energization.{plan['period']}",
              "label": f"Energized capacity{when}", "says_name": f"{link} energized capacity{when}",
