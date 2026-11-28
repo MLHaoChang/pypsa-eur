@@ -264,7 +264,7 @@ describe('GenerateReportDialog — template (WP11)', () => {
       charts.getReportVariants.mockResolvedValue({ ...INFO, stale: true, stale_reasons: ['ledger changed'] })
       renderDialog({ project: 'demo' })
       const group = await screen.findByTestId('report-variants')
-      expect(group.textContent).toMatch(/option compare is out of date/)
+      expect(group.textContent).toMatch(/Out of date: the inputs changed after the last option compare/)
       expect(within(group).queryByRole('radio')).toBeNull()
     })
   })

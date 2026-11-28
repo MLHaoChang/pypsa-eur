@@ -265,7 +265,7 @@ export function GenerateReportDialog({
             <legend className="text-[10.5px] font-medium text-muted">Report variant</legend>
             {variants?.stale ? (
               <p className="text-[11px] text-muted" role="status">
-                The option compare is out of date. Rerun it to rank the options. Until then only the standard report is offered.
+                Out of date: the inputs changed after the last option compare. Run the compare again to rank the options. Until then only the standard report is offered.
               </p>
             ) : (
               <>

@@ -70,7 +70,7 @@ def check_request(variant: str | None, n: int | None) -> None:
             raise VariantError("report_variant_invalid", "n goes with the variant top_npv only.")
         return
     if variant not in VARIANTS:
-        raise VariantError("report_variant_invalid", f"Unknown report variant {variant!r}.")
+        raise VariantError("report_variant_invalid", f"Unknown report variant: {variant}.")
     if variant == GREATEST_IRR and n is not None:
         raise VariantError("report_variant_invalid", "n goes with the variant top_npv only.")
     if variant == TOP_NPV and n is not None and not 1 <= n <= MAX_N:
@@ -79,6 +79,11 @@ def check_request(variant: str | None, n: int | None) -> None:
 
 def _finite(x) -> float | None:
     return float(x) if isinstance(x, (int, float)) and math.isfinite(x) else None
+
+
+def _plain(reason: str | None) -> str | None:
+    """The source's reason when it is a sentence; a code such as ``irr_undefined`` is not."""
+    return reason if reason and " " in reason.strip() else None
 
 
 def option_figures(report: DecisionReport, cases: dict[str, InvestmentCase]) -> list[dict]:
@@ -91,7 +96,7 @@ def option_figures(report: DecisionReport, cases: dict[str, InvestmentCase]) -> 
         irr = _finite(k.irr) if k is not None else None
         out.append({"option_id": o["option_id"], "label": o["label"],
                     "npv": _finite(o.get("option_npv")), "irr": irr,
-                    "irr_reason": (k.unavailable.get("irr") if k is not None else None)})
+                    "irr_reason": _plain(k.unavailable.get("irr") if k is not None else None)})
     return out
 
 
@@ -104,7 +109,7 @@ def rank(figures: list[dict], variant: str, n: int | None = None) -> Ranking:
         names = ", ".join(f["option_id"] for f in lacking) or "none"
         raise VariantError(
             "report_variant_too_few_options",
-            f"Fewer than 2 options have a {ranked_key.upper()} to rank (left out: {names}).")
+            f"Fewer than 2 options have an {ranked_key.upper()} to rank. Left out: {names}.")
     have.sort(key=lambda f: (-f[ranked_key],
                              -(f[other] if f[other] is not None else -math.inf), f["option_id"]))
     limit = (n if n is not None else DEFAULT_N) if variant == TOP_NPV else 1
@@ -141,9 +146,14 @@ def _rule(variant: str, limit: int, available: int, has_unranked: bool) -> str:
 
 def table_rows(r: Ranking) -> list[list[str]]:
     """Rows as the docx table shows them: rank, option, NPV, IRR (as the compare view formats)."""
-    rows = [[str(x.rank), f"{x.label} ({x.option_id})", num(x.npv), pct(x.irr)]
-            for x in r.rows]
-    rows += [["—", f"{x.label} ({x.option_id})",
+    everyone = [*r.rows, *r.unranked]
+    labels = [x.label for x in everyone]
+
+    def name(x: Row) -> str:  # the label alone, with the id only where labels clash
+        return f"{x.label} ({x.option_id})" if labels.count(x.label) > 1 else x.label
+
+    rows = [[str(x.rank), name(x), num(x.npv), pct(x.irr)] for x in r.rows]
+    rows += [["—", name(x),
               num(x.npv) if x.npv is not None else f"— ({x.reason})",
               pct(x.irr) if x.irr is not None else f"— ({x.reason})"]
              for x in r.unranked]

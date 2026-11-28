@@ -278,7 +278,8 @@ def ranking_for_study(project: AuthorizedProject, study_id: str, db: DBSession,
     if reasons:
         raise HTTPException(409, {
             "error_kind": "option_compare_stale",
-            "message": "The option compare is out of date. Rerun it before ranking the options.",
+            "message": ("Out of date: the inputs changed after the last option compare. "
+                        "Run the compare again to rank the options."),
             "stale_reasons": list(reasons)})
     try:
         ranking = OR.rank(OR.option_figures(report, cases), variant, n)

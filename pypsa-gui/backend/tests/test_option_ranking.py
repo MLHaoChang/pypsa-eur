@@ -41,7 +41,7 @@ def test_greatest_irr_names_unranked_with_reason():
     assert [x.option_id for x in r.rows] == ["d"]
     assert {x.option_id: x.reason for x in r.unranked}["c"] == "no IRR: never positive"
     rows = OR.table_rows(r)
-    assert rows[0] == ["1", "D (d)", "300", "9.0 %"]
+    assert rows[0] == ["1", "D", "300", "9.0 %"]
     assert any("— (no IRR: never positive)" in cell for row in rows for cell in row)
 
 
@@ -70,8 +70,8 @@ def test_docx_table_has_options_in_npv_order_with_compare_formatting():
     assert sec.category == "investment" and r.rule in doc.tables["option_ranking"].caption
     d = Document(io.BytesIO(render_document_docx(doc, figure_bytes={})))
     cells = [[c.text for c in row.cells] for t in d.tables for row in t.rows]
-    ranked = [row for row in cells if row and row[0] in {"1", "3"} and "(" in row[1]]
-    assert [row[1] for row in ranked] == ["D (d)", "B (b)", "C (c)"]
+    ranked = [row for row in cells if row and row[0] in {"1", "3"} and row[1] in {"B", "C", "D"}]
+    assert [row[1] for row in ranked] == ["D", "B", "C"]
     assert ranked[0][2:] == [num(300.0), pct(0.09)]
 
 
@@ -126,3 +126,17 @@ def test_ranking_for_a_stale_compare_is_409(monkeypatch):
     with pytest.raises(HTTPException) as e:
         studies.ranking_for_study(None, "s1", None, "top_npv", None)
     assert e.value.status_code == 409 and e.value.detail["error_kind"] == "option_compare_stale"
+
+
+def test_a_reason_code_falls_back_to_the_plain_sentence():
+    assert OR._plain("irr_undefined") is None
+    r = OR.rank([_f("a", 1.0, 0.1), _f("b", 2.0, 0.2), _f("c", 3.0, None, OR._plain("irr_undefined"))],
+                "greatest_irr")
+    assert r.unranked[0].reason == OR.NO_IRR_REASON
+
+
+def test_ids_show_only_where_labels_clash():
+    figs = [{**_f("a", 1.0, 0.1), "label": "Same"}, {**_f("b", 2.0, 0.2), "label": "Same"},
+            _f("c", 3.0, 0.3)]
+    cells = [row[1] for row in OR.table_rows(OR.rank(figs, "top_npv"))]
+    assert cells == ["C", "Same (b)", "Same (a)"]
