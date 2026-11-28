@@ -378,6 +378,68 @@ def save_dc_backup(
             "error_kind": "dc_backup_busy", "message": str(exc)}) from exc
 
 
+@router.put("/{name}/dc-load")
+def save_dc_load(
+    body: dict = Body(...),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Change a data-centre project's PUE at design, critical share, backup
+    mode (``backup.mode``) or power ``architecture`` after creation (te 04).
+    The merged spec passes the create body's checks; a PUE or critical-share
+    change rewrites the IT and cooling series on the open project's network
+    (one undo step), and the stored spec, envelope and ledger follow, all or
+    nothing. ``overwrite_series`` replaces a series the user edited (else 409
+    ``dc_series_edited``). 422 ``dc_load_invalid`` names the field; 409
+    ``project_not_open`` / ``study_running`` / ``dc_load_busy``."""
+    from services import dirty_state, project_registry
+    from services.dc_load_update import DcLoadUpdateError, update_dc_load
+    from services.dispatch_status import clear_dispatch
+    from services.network_undo import push_undo_snapshot
+    from services.pypsa_service import PyPSAService
+    from services.undo_service import pop as pop_undo
+
+    _check_lock(proj, db, user)
+    patch = dict(body)
+    overwrite = bool(patch.pop("overwrite_series", False))
+    # Before any write: a live study reads the network this edits.
+    PyPSAService.refuse_if_study_running("change the data-centre load")
+    ctx = PyPSAService.get_active_context()
+    resident = ctx.loaded_project in (None, proj.name) and ctx.network is not None
+    project_dir = project_registry.project_dir(_row(proj, db))
+    pushed = False
+    try:
+        with PyPSAService.get_lock():
+            if resident and any(k in patch for k in ("pue_at_design", "critical_share")):
+                # The series are rewritten: one undo step. A marker-only edit
+                # (backup mode, architecture) is not on the stack, as dc-backup.
+                push_undo_snapshot()
+                pushed = True
+            try:
+                out = update_dc_load(project_dir, _eh_templates(), patch,
+                                     ctx.network if resident else None, overwrite_series=overwrite)
+            except DcLoadUpdateError:
+                if pushed:
+                    pop_undo()
+                raise
+            if out["series_changed"]:
+                clear_dispatch(ctx.network)
+                dirty_state.bump_inputs(ctx)
+                dirty_state.bump_revision(ctx)
+                dirty_state.mark_dirty(ctx)
+            elif pushed:
+                pop_undo()      # same values: nothing changed, no step
+            return out
+    except DcLoadUpdateError as exc:
+        status = 409 if exc.kind in ("project_not_open", "dc_series_edited") else 422
+        raise HTTPException(status_code=status, detail={
+            "error_kind": exc.kind, "message": str(exc), "field": exc.field}) from exc
+    except TimeoutError as exc:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "dc_load_busy", "message": "the project's template metadata is busy; try again"}) from exc
+
+
 @router.post("/{name}/dc-backup/assess")
 async def assess_dc_backup(
     body: DcBackupAssessBody,
