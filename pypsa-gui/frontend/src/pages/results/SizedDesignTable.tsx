@@ -95,12 +95,10 @@ export function SizedDesignTable({ report, mode, testId }: {
   const left = section?.status === 'ok' ? notCountedRows(section.payload) : null
   const [showAll, setShowAll] = useState(false)
   // More than SLACK_FOLD shortfall / buy-in rows fold behind "Show all" (UX 34).
-  const slackIdx = (left ?? []).flatMap(([label], i) => (label.endsWith('(not counted)') ? [i] : []))
+  const slackIdx = (left ?? []).flatMap((r, i) => (r.kind === 'slack' ? [i] : []))
   const hidden = new Set(showAll || slackIdx.length <= SLACK_FOLD ? [] : slackIdx.slice(SLACK_FOLD))
   const shownLeft = (left ?? []).filter((_, i) => !hidden.has(i))
   const hiddenSlacks = hidden.size
-  const connectionExceeds = (section?.payload as { connection_check?: unknown } | undefined)
-    ?.connection_check === 'exceeds'
   if (rows.length === 0 && !left) return null
   // The row's own unit (the report prints the same); a report stored before
   // rows carried one falls back to section 5's.
@@ -155,22 +153,22 @@ export function SizedDesignTable({ report, mode, testId }: {
           </span>
           <table className={`w-full ${guided ? 'text-[12px]' : 'text-[10px]'}`}>
             <tbody>
-              {shownLeft.map(([label, value], i) => {
-                // The over-limit verdict is the payload's, in words and in warn colour.
-                const warn = i === 0 && connectionExceeds
-                return (
-                  <tr key={`${label}-${i}`} data-testid={`${testId}-not-counted-${i}`}
-                    className="border-t border-border/50 align-top">
-                    <td className={cell}>{label}</td>
-                    <td className={`${cell} text-right font-mono${warn ? ' text-warn' : ''}`}>{value}</td>
-                  </tr>
-                )
-              })}
+              {shownLeft.map((r, i) => (
+                <tr key={`${r.label}-${i}`} data-testid={`${testId}-not-counted-${i}`}
+                  className="border-t border-border/50 align-top">
+                  <td className={cell}>{r.label}</td>
+                  {/* Figures in mono, a sentence in the text font; the over-limit
+                      verdict is the payload's, in words and in warn colour. */}
+                  <td className={`${cell} text-right${r.sentence ? '' : ' font-mono'}${r.warn ? ' text-warn' : ''}`}>
+                    {r.value}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           {hiddenSlacks > 0 && (
             <button type="button" data-testid={`${testId}-not-counted-more`}
-              className="self-start text-[10px] text-accent hover:underline"
+              className="self-start text-[10px] text-text underline"
               onClick={() => setShowAll(true)}>
               ({hiddenSlacks} more) Show all
             </button>

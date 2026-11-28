@@ -84,22 +84,39 @@ export function connectionCell(p: EhSizingConnection): string {
 
 const SLACK_WORDS: Record<string, string> = { shortfall: 'Shortfall', buy_in: 'Bought in' }
 
-/** The rows, label then cell; null for a payload stored before the
+/** One row of the block: the report's label and cell, which kind of row it
+ *  is, whether the cell is a sentence (text font) rather than figures (mono),
+ *  and whether it states an over-limit verdict (warn colour). */
+export interface NotCountedRow {
+  label: string
+  value: string
+  kind: 'connection' | 'slack' | 'counted'
+  sentence: boolean
+  warn: boolean
+}
+
+/** The rows in the report's order; null for a payload stored before the
  *  connection was read apart (`grid_connection_mw` absent), which shows
  *  nothing new, as the report renders it (GK A 33 S4). */
-export function notCountedRows(payload: unknown): [string, string][] | null {
+export function notCountedRows(payload: unknown): NotCountedRow[] | null {
   if (payload == null || typeof payload !== 'object' || !('grid_connection_mw' in payload)) return null
   const p = payload as EhSizingConnection
   const over = p.horizon ? `over the horizon (${p.horizon})` : 'over the horizon'
-  const rows: [string, string][] = [[GRID_ROW, connectionCell(p)]]
+  // A refusal or the unbounded words are a sentence; a limit is figures.
+  const figures = p.connection_check !== 'unbounded' && p.grid_connection_mw != null
+  const rows: NotCountedRow[] = [{ label: GRID_ROW, value: connectionCell(p), kind: 'connection',
+    sentence: !figures, warn: figures && p.connection_check === 'exceeds' }]
   for (const s of p.product_slacks ?? []) {
     // A slack that delivered nothing has no row (the report's own rule).
     if (s.energy == null || Math.abs(s.energy) < 1e-9) continue
-    rows.push([
-      `${Object.prototype.hasOwnProperty.call(SLACK_WORDS, s.process_role) ? SLACK_WORDS[s.process_role] : s.process_role}, ${s.carrier || s.name} (not counted)`,
-      `${fmt1(s.p_nom, s.unit)} · ${fmt1(s.energy, s.energy_unit)} ${over}`,
-    ])
+    rows.push({
+      label: `${Object.prototype.hasOwnProperty.call(SLACK_WORDS, s.process_role) ? SLACK_WORDS[s.process_role] : s.process_role}, ${s.carrier || s.name} (not counted)`,
+      value: `${fmt1(s.p_nom, s.unit)} · ${fmt1(s.energy, s.energy_unit)} ${over}`,
+      kind: 'slack', sentence: false, warn: false,
+    })
   }
-  for (const line of p.grid_supply_counted ?? []) rows.push(['Grid supply counted', String(line)])
+  for (const line of p.grid_supply_counted ?? []) {
+    rows.push({ label: 'Grid supply counted', value: String(line), kind: 'counted', sentence: true, warn: false })
+  }
   return rows
 }

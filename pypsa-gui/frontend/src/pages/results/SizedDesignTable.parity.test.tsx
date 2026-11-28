@@ -148,3 +148,37 @@ describe('the not-counted block reads at a glance (UX 34)', () => {
   })
 })
 
+describe('the not-counted cells set figures apart from sentences (UX 34)', () => {
+  const cellOf = (i: number) => screen.getByTestId(`t-not-counted-${i}`).querySelectorAll('td')[1]
+
+  it('a refusal and a counted reason are sentences; a limit and a slack are figures', () => {
+    render(<SizedDesignTable testId="t" mode="expert" report={report([], {
+      grid_connection_mw: null, grid_connection_refusal: 'No link is marked as the grid import.',
+      product_slacks: [{ name: 's', process_role: 'shortfall', carrier: 'NH3', p_nom: 1, energy: 2, unit: 'MW', energy_unit: 'MWh' }],
+      grid_supply_counted: ['g is counted: bus grid also holds load L'] })} />)
+    expect(cellOf(0).className).not.toContain('font-mono')
+    expect(cellOf(1).className).toContain('font-mono')
+    expect(cellOf(2).className).not.toContain('font-mono')
+    cleanup()
+    render(<SizedDesignTable testId="t" mode="expert" report={report([], { grid_connection_mw: 40 })} />)
+    expect(cellOf(0).className).toContain('font-mono')
+  })
+
+  it('warns on the connection row by its kind, never on a slack row', () => {
+    render(<SizedDesignTable testId="t" mode="guided" report={report([], {
+      grid_connection_mw: 40, grid_import_peak_mw: 41, connection_check: 'exceeds',
+      product_slacks: [{ name: 's', process_role: 'shortfall', carrier: 'NH3', p_nom: 1, energy: 2, unit: 'MW', energy_unit: 'MWh' }] })} />)
+    expect(cellOf(0).className).toContain('text-warn')
+    expect(cellOf(1).className).not.toContain('text-warn')
+  })
+
+  it('the fold control is an ink, always-underlined link', () => {
+    render(<SizedDesignTable testId="t" mode="guided" report={report([], { grid_connection_mw: 40,
+      product_slacks: [1, 2, 3, 4, 5, 6].map(i => ({ name: `s${i}`, process_role: 'shortfall', carrier: `P${i}`, p_nom: 1, energy: 2 })) })} />)
+    const more = screen.getByTestId('t-not-counted-more')
+    expect(more.className).toContain('underline')
+    expect(more.className).not.toContain('text-accent')
+    expect(more.className).not.toContain('hover:underline')
+  })
+})
+
