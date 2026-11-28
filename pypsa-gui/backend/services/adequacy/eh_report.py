@@ -108,7 +108,8 @@ def _weighted_energy(n, name: str) -> float | None:
 
 # One rule for "the grid-side bus holds nothing else of the site's", shared
 # with section 5's site assets (GK A 40, follow-up b); the old names stay.
-from services.flow_service import _export_only, site_equipment_on as _site_side  # noqa: E402
+from services.flow_service import _export_only as _export_only  # noqa: E402
+from services.flow_service import site_equipment_on as _site_side  # noqa: E402,F401
 
 
 def _import_peaks(n, links: tuple[str, ...]) -> dict[Any, float] | None:
