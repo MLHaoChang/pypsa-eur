@@ -3,7 +3,7 @@
 
 # 25 — Expert is not read-only during a study run and the run cannot be aborted
 
-Status: ready-for-agent
+Status: partly done (PR #2114: read-only + Abort; progress line and section 5 wait on issue 17)
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: run → results (RUN-READONLY-1, UX-FLOW-NEXT-1).

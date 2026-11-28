@@ -57,6 +57,8 @@ interface AssetRow {
 export default function CapacityBoundsEditor() {
   const qc = useQueryClient()
   const currentProject = useUIStore(s => s.currentProject)
+  // Read-only while a run holds the project (template-e2e 25): a disabled fieldset disables every input below.
+  const readOnly = useUIStore(s => s.readOnly)
   // Per-component-class queries. Each fetches the static rows from the
   // existing network endpoints; we filter to extendable-only client-side.
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
@@ -183,7 +185,8 @@ export default function CapacityBoundsEditor() {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm">
+    <fieldset disabled={readOnly} data-testid="bounds-fieldset"
+      className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm min-w-0 border-0 m-0 disabled:opacity-60">
       <BackupInputs />
       <div className="text-[11.5px] text-muted -mt-2 leading-relaxed">
         Every extendable asset is listed here. Each can use a <span className="font-medium">single</span>{' '}
@@ -243,7 +246,7 @@ export default function CapacityBoundsEditor() {
           onClose={() => setModalFor(null)}
         />
       )}
-    </div>
+    </fieldset>
   )
 }
 

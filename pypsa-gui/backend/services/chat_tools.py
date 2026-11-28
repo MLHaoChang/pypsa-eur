@@ -6178,235 +6178,6 @@ def undo_status() -> dict:
 # frames the ChatPanel forwards to uiStore. NO backend mutation.
 
 
-def ui_select_component(component_class: str, name: str, open_editor: bool | None = None) -> dict:
-    if open_editor is not None and type(open_editor) is not bool:
-        raise HTTPException(400, detail={
-            "error_kind": "invalid_navigation", "field": "open_editor",
-            "message": "Use a boolean for open_editor.",
-        })
-    if open_editor:
-        if component_class not in {"Bus", "Line", "Transformer", "Link", "Generator", "StorageUnit", "Store", "Load"}:
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": "component_class",
-                "message": "Choose a component with an Edit form in Properties.",
-            })
-        attr = _GENERIC_CRUD_ATTRS[component_class]
-        df = getattr(PyPSAService.get_network(), attr)
-        if name not in df.index:
-            raise HTTPException(404, detail={
-                "error_kind": "component_not_found", "component_class": component_class, "name": name,
-                "message": f"{component_class} '{name}' is not in the network.",
-            })
-        return {"_ui_event": True, "kind": "open_properties",
-                "component_class": component_class, "name": name}
-    from services.asset_results import compute as asset_compute
-    try:
-        df = getattr(PyPSAService.get_network(), asset_compute.attr_for(component_class))
-    except KeyError:
-        df = None
-    if df is None or name not in df.index:
-        raise HTTPException(404, detail={
-            "error_kind": "component_not_found", "component_class": component_class, "name": name,
-            "message": f"{component_class} '{name}' is not in the network.",
-        })
-    return {"_ui_event": True, "kind": "select_component",
-            "component_class": component_class, "name": name}
-
-
-# LC-14 item 5: the sections of each panel chat can scroll to, and the title the user sees for it.
-# Keyed by the lower-camel panel id; the catalogue's PANEL_SECTION_ENUM is the union (a test pins it).
-_PANEL_SECTIONS: dict[str, tuple[str, frozenset[str]]] = {
-    "campusElectrical": ("the grid connection", frozenset({
-        "campus_file", "grid_connection", "connection_limits", "grid_codes", "library"})),
-    "campusStudy": ("the grid study", frozenset({"study_settings", "island"})),
-    "campusResults": ("the grid study results", frozenset({"grid_code_results", "electrical_design"})),
-    "gridspine": ("Planning → dynamics", frozenset({
-        "dispatch_source", "configuration", "ranked_snapshots", "assumptions_ledger", "readback",
-        "connection_capacity", "connection_assessment"})),
-}
-_PANEL_SECTION_ORDER = [
-    "campus_file", "grid_connection", "connection_limits", "grid_codes", "library",
-    "study_settings", "island", "grid_code_results", "electrical_design",
-    "dispatch_source", "configuration", "ranked_snapshots", "assumptions_ledger",
-    "readback", "connection_capacity", "connection_assessment",
-]
-
-
-def ui_open_panel(
-    panel_id: str,
-    results_tab: str | None = None,
-    bottom_tab: str | None = None,
-    compare_rail: bool | None = None,
-    compare_a: str | None = None,
-    compare_b: str | None = None,
-    compare_tab: str | None = None,
-    canvas_view: str | None = None,
-    guided_step: str | None = None,
-    panel_section: str | None = None,
-    loadflow_source: str | None = None,
-    window_from: int | None = None,
-    window_to: int | None = None,
-    highlight_branch: dict | None = None,
-    highlight_projects: list[str] | None = None,
-) -> dict:
-    """
-    Navigate the GUI. Emits a ``ui_event`` SSE frame (kind=navigate) that
-    ChatPanel applies to uiStore — slide panels, Results sub-tabs, bottom
-    asset tabs, and the A|B compare rail.
-
-    Load flow arguments (live-voice 07) need panel results and results_tab
-    loadflow. With any of them the view is read first: an unavailable view or
-    an unknown branch refuses with no event. Without them the call is unchanged.
-
-    `highlight_projects` (LC-17, Scenarios only): up to four projects the
-    caller may open, highlighted in the scenario tree; any other refuses.
-    """
-    from harness.catalogue import (
-        BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
-    )
-    for key, value, allowed in (
-        ("panel_id", panel_id, SAFETY_PANEL_ENUM),
-        ("results_tab", results_tab, RESULTS_TAB_ENUM),
-        ("bottom_tab", bottom_tab, BOTTOM_TAB_ENUM),
-        ("compare_tab", compare_tab, COMPARE_TAB_ENUM),
-    ):
-        if (key == "panel_id" or value is not None) and (not isinstance(value, str) or value not in allowed):
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": key,
-                "message": f"Choose a supported {key} from the tool schema.",
-            })
-    for key, value, valid in (
-        ("compare_rail", compare_rail, type(compare_rail) is bool),
-        ("compare_a", compare_a, isinstance(compare_a, str)),
-        ("compare_b", compare_b, isinstance(compare_b, str)),
-    ):
-        if value is not None and not valid:
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": key,
-                "message": f"Use the declared {key} type from the tool schema.",
-            })
-    if canvas_view is not None and not (
-        (panel_id in {"Topology", "topology"} and canvas_view == "blank")
-        or (panel_id in {"MapCanvas", "map"} and canvas_view in ("satellite", "hybrid", "site"))
-    ):
-        raise HTTPException(400, detail={
-            "error_kind": "invalid_navigation", "field": "canvas_view",
-            "message": "Choose blank for topology, or satellite, hybrid or site for map.",
-        })
-    if guided_step is not None:
-        from harness import workflows
-
-        steps = [step.id for step in workflows.get("hub-design").steps]
-        if panel_id not in {"HubDesign", "hubDesign"} or not isinstance(guided_step, str) or guided_step not in steps:
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": "guided_step",
-                "message": f"Choose a Guided card: {', '.join(steps[:-1])} or {steps[-1]}. "
-                           "Cards exist only in the hub design.",
-            })
-    if panel_section is not None:
-        by_name = {k.lower(): v for k, v in _PANEL_SECTIONS.items()}  # CampusStudy, GridSpine: either spelling
-        title, valid = by_name.get(panel_id.lower(), (None, frozenset()))
-        if title is None:
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": "panel_section",
-                "message": "Sections exist only in the grid connection, the grid study, the grid study "
-                           "results and Planning → dynamics.",
-            })
-        if not isinstance(panel_section, str) or panel_section not in valid:
-            ids = [s for s in _PANEL_SECTION_ORDER if s in valid]
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": "panel_section",
-                "message": f"Choose a section of {title}: {', '.join(ids[:-1])} or {ids[-1]}."
-                           if len(ids) > 1 else f"Choose a section of {title}: {ids[0]}.",
-            })
-    if highlight_projects is not None:
-        if (panel_id not in {"Scenarios", "scenarios"} or not isinstance(highlight_projects, list)
-                or not 1 <= len(highlight_projects) <= 4 or not all(isinstance(p, str) for p in highlight_projects)):
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": "highlight_projects",
-                "message": "Pass 1–4 project ids with panel_id scenarios.",
-            })
-        from services import project_registry
-        with _acting() as (db, user):  # an id the caller cannot open refuses like an unknown one
-            highlight_projects = [str(project_registry.resolve_project(db, user, p).id) for p in highlight_projects]
-    loadflow = _loadflow_navigation_args(panel_id, results_tab, loadflow_source,
-                                         window_from, window_to, highlight_branch)
-    facts = None
-    if loadflow:
-        from harness.navigation import loadflow_target
-
-        _view, facts = loadflow_target(loadflow.get("loadflow_source"), loadflow.get("window_from"),
-                                       loadflow.get("window_to"), loadflow.get("highlight"))
-    event: dict[str, Any] = {
-        "_ui_event": True,
-        "kind": "navigate",
-        "panel_id": panel_id,
-    }
-    if results_tab:
-        event["results_tab"] = results_tab
-    event.update(loadflow)
-    if facts is not None:
-        event["highlight_facts"] = facts
-    if bottom_tab:
-        event["bottom_tab"] = bottom_tab
-    if compare_rail is not None:
-        event["compare_rail"] = bool(compare_rail)
-    if compare_a:
-        event["compare_a"] = compare_a
-    if compare_b:
-        event["compare_b"] = compare_b
-    if compare_tab:
-        event["compare_tab"] = compare_tab
-    if canvas_view is not None:
-        event["canvas_view"] = canvas_view
-    if guided_step is not None:
-        event["guided_step"] = guided_step
-    if panel_section is not None:
-        event["panel_section"] = panel_section
-    if highlight_projects:
-        event["highlight_projects"] = highlight_projects
-    return event
-
-
-def _loadflow_navigation_args(panel_id, results_tab, source, window_from, window_to,
-                              highlight) -> dict:
-    """Validate the optional Load flow navigation arguments (shape only)."""
-    def refuse(field: str, message: str) -> None:
-        raise HTTPException(400, detail={
-            "error_kind": "invalid_navigation", "field": field, "message": message})
-
-    given = {k: v for k, v in (("loadflow_source", source), ("window_from", window_from),
-                               ("window_to", window_to), ("highlight", highlight))
-             if v is not None}
-    if not given:
-        return {}
-    if panel_id != "results" or results_tab != "loadflow":
-        refuse(next(iter(given)), "Load flow arguments need panel_id results and results_tab loadflow.")
-    if source is not None and source not in ("lopf", "ac_pf"):
-        refuse("loadflow_source", "Choose lopf or ac_pf.")
-    if (window_from is None) != (window_to is None):
-        refuse("window_from", "Give window_from and window_to together, or neither.")
-    if window_from is not None:
-        if type(window_from) is not int or type(window_to) is not int:
-            refuse("window_from", "Window positions are integer snapshot indexes.")
-        if window_from < 0 or window_to < window_from:
-            refuse("window_from", "Use 0 <= window_from <= window_to.")
-        network = PyPSAService.get_active_context().network
-        n_snapshots = len(network.snapshots) if network is not None else 0
-        # No network: the view read below refuses with no_network instead.
-        if network is not None and not 0 <= window_from <= window_to < n_snapshots:
-            refuse("window_from", f"Use 0 <= window_from <= window_to < {n_snapshots}.")
-    if highlight is not None:
-        if (not isinstance(highlight, dict) or set(highlight) != {"component", "name"}
-                or highlight["component"] not in ("Line", "Transformer")
-                or not isinstance(highlight["name"], str)
-                or not 1 <= len(highlight["name"]) <= 128):
-            refuse("highlight_branch",
-                   "highlight_branch is {component: Line or Transformer, name: 1-128 characters}.")
-        given["highlight"] = {"component": highlight["component"], "name": highlight["name"]}
-    return given
-
-
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
     import pandas as pd
 
@@ -7791,240 +7562,6 @@ def reconstruct_network_from_image(
 # / ui_open_panel above.
 
 
-def _series_stats(index: list[str], values: list, *, points: int = 48) -> dict:
-    """
-    Compress a series to something worth putting in a context window.
-
-    An hourly year is 8 760 numbers per metric; ten metrics is ~87 000. The
-    agent can answer almost every real question — peak, mean, total, when it
-    peaks, how often it sits at zero — from these ~12 fields plus a coarse
-    sparkline, and it is told to reach for the export tool when it cannot.
-
-    `zero_count` is an unweighted count of SNAPSHOTS, deliberately not named
-    `zero_hours` — the response's own `scalars["zero_hours"]` (from the
-    `zero_hours` metric in the registry) is the snapshot-WEIGHTED hour count.
-    Two identically-named fields with different values in the same payload
-    would be indistinguishable to the agent; different names make the
-    difference legible instead of silent.
-    """
-    finite = [(i, float(v)) for i, v in enumerate(values)
-              if v is not None and math.isfinite(float(v))]
-    if not finite:
-        return {"min": None, "max": None, "mean": None, "sum": None,
-                "p50": None, "p95": None, "peak_at": None,
-                "zero_count": 0, "sparkline": []}
-    vals = [v for _, v in finite]
-    ordered = sorted(vals)
-    peak_i = max(finite, key=lambda t: t[1])[0]
-
-    def pct(q: float) -> float:
-        k = min(len(ordered) - 1, max(0, int(round(q * (len(ordered) - 1)))))
-        return ordered[k]
-
-    step = max(1, len(vals) // points)
-    return {
-        "min": ordered[0],
-        "max": ordered[-1],
-        "mean": sum(vals) / len(vals),
-        "sum": sum(vals),
-        "p50": pct(0.5),
-        "p95": pct(0.95),
-        "peak_at": index[peak_i] if peak_i < len(index) else None,
-        "zero_count": sum(1 for v in vals if abs(v) < 1e-9),
-        "sparkline": [round(v, 4) for v in vals[::step]][:points],
-    }
-
-
-def get_asset_results(
-    component_class: str,
-    name: str,
-    *,
-    category: str = "summary",
-    metrics: list | None = None,
-    source: str = "lopf",
-    from_iso: str | None = None,
-    to_iso: str | None = None,
-    period: str | None = None,
-    resolution: str = "stats",
-    max_rows: int = 2000,
-) -> dict:
-    """Per-asset results for the agent. Statistics by default; raw on request."""
-    from services.asset_results import service as svc
-    from services.asset_results.registry import metrics_for
-
-    n = PyPSAService.get_network()
-    df = getattr(n, svc.C.attr_for(component_class))
-    if name not in df.index:
-        raise ValueError(f"No {component_class} named '{name}'")
-
-    # No explicit metric list means "everything in this category" — the agent
-    # asks a question, it does not know the registry's metric ids up front.
-    requested = [str(m) for m in (metrics or [])]
-    if not requested:
-        requested = [m.id for m in metrics_for(component_class, category)]
-
-    resp = svc.build_response(
-        n, component_class, name, category=category, metric_ids=requested,
-        source=source, from_iso=from_iso, to_iso=to_iso, period=period,
-        mode="chronological",
-    )
-
-    unavailable = [
-        {"id": m["id"], "label": m["label"], "status": m["status"],
-         "reason": m.get("reason", "")}
-        for m in resp["metrics"] if m["status"] != "ok"
-    ]
-    out: dict = {
-        "asset": resp["asset"],
-        "category": category,
-        "categories": [{"id": c["id"], "status": c["status"],
-                        "reason": c.get("reason", "")} for c in resp["categories"]],
-        "scalars": resp["scalars"],
-        "unavailable": unavailable,
-        "n_snapshots": len(resp["index"]),
-    }
-    # The default category is `summary`, whose own metrics are just identity
-    # and parameters. The headline KPIs are what makes "summarise Gas 1"
-    # answerable in one call instead of seven — carry them through, each
-    # tagged with the tab it came from so the agent can cite a source.
-    if resp.get("headline"):
-        out["headline"] = [
-            {"id": h["id"], "label": h["label"], "unit": h.get("unit", ""),
-             "category": h["category"], "status": h["status"],
-             **({"value": h["value"]} if "value" in h else {}),
-             **({"reason": h["reason"]} if h.get("reason") else {})}
-            for h in resp["headline"]
-        ]
-    if resolution == "raw":
-        out["resolution"] = "raw"
-        out["index"] = resp["index"][:max_rows]
-        out["series"] = {k: v[:max_rows] for k, v in resp["series"].items()}
-        out["truncated"] = len(resp["index"]) > max_rows
-        out["n_total"] = len(resp["index"])
-        out["note"] = (
-            f"Truncated to the first {max_rows} rows. Call export_asset_results for the "
-            "complete set as a workbook."
-            if out["truncated"] else "Complete — no truncation."
-        )
-    else:
-        out["resolution"] = "stats"
-        out["series_stats"] = {
-            k: _series_stats(resp["index"], v) for k, v in resp["series"].items()
-        }
-    return out
-
-
-def ui_open_asset_detail(
-    component_class: str,
-    name: str,
-    *,
-    category: str | None = None,
-    metrics: list | None = None,
-    mode: str | None = None,
-    chart: bool | None = None,
-) -> dict:
-    """Open the Asset Detail tab pre-configured. No backend mutation."""
-    from services.asset_results import compute as asset_compute
-    from services.asset_results.registry import metric_for
-    try:
-        df = getattr(PyPSAService.get_network(), asset_compute.attr_for(component_class))
-    except KeyError:
-        df = None
-    if df is None or name not in df.index:
-        raise HTTPException(404, detail={
-            "error_kind": "component_not_found", "component_class": component_class, "name": name,
-            "message": f"{component_class} '{name}' is not in the network.",
-        })
-    for m in metrics or []:
-        if metric_for(component_class, str(m)) is None:
-            raise HTTPException(400, detail={
-                "error_kind": "invalid_navigation", "field": "metrics",
-                "message": f"{component_class} has no metric '{m}'.",
-            })
-    from services.asset_results.registry import CATEGORY_IDS
-    from services.asset_results.service import VIEW_MODES
-    if category and category not in CATEGORY_IDS:
-        raise HTTPException(400, detail={
-            "error_kind": "invalid_navigation", "field": "category",
-            "message": f"Unknown category '{category}'; use one of {', '.join(CATEGORY_IDS)}.",
-        })
-    if mode and mode not in VIEW_MODES:
-        raise HTTPException(400, detail={
-            "error_kind": "invalid_navigation", "field": "mode",
-            "message": f"Unknown mode '{mode}'; use one of {', '.join(VIEW_MODES)}.",
-        })
-    event: dict[str, Any] = {
-        "_ui_event": True, "kind": "open_asset_detail",
-        "component_class": component_class, "name": name,
-    }
-    if category:
-        event["category"] = category
-    if metrics:
-        event["metrics"] = [str(m) for m in metrics]
-    if mode:
-        event["mode"] = mode
-    if chart is not None:
-        event["chart"] = bool(chart)
-    return event
-
-
-def export_asset_results(
-    component_class: str,
-    name: str,
-    *,
-    scope: str = "view",
-    category: str = "summary",
-    metrics: list | None = None,
-    filename: str | None = None,
-    source: str = "lopf",
-    mode: str = "chronological",
-) -> dict:
-    """Write one asset's results to an xlsx workbook in the project's uploads/."""
-    from services.asset_results import export as xls
-    from services.asset_results import service as svc
-
-    n = PyPSAService.get_network()
-    df = getattr(n, svc.C.attr_for(component_class))
-    if name not in df.index:
-        raise ValueError(f"No {component_class} named '{name}'")
-
-    blob = xls.build_workbook(
-        n, component_class, name, scope=scope, category=category,
-        metric_ids=[str(m) for m in (metrics or [])], source=source,
-        from_iso=None, to_iso=None, period=None, mode=mode,
-        project=PyPSAService.get_loaded_project(),
-    )
-    # Same 25 MB pre-check export_to_excel applies before handing bytes to
-    # the shared writer — see the note on `_save_agent_export` below for why
-    # this isn't inside that helper itself.
-    if len(blob) > 25 * 1024 * 1024:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "error_kind": "file_too_large",
-                "message": (
-                    f"serialised workbook exceeds the 25 MB upload cap "
-                    f"({len(blob) // (1024 * 1024)} MB)"
-                ),
-            },
-        )
-    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
-    fname = filename or f"{safe_name}_{category}.xlsx"
-    # No `_write_agent_export` helper exists anywhere in this codebase — only
-    # a stale docstring reference in filename_service.py. The real shared
-    # writer (already used by export_to_excel and four sibling export tools)
-    # is `_save_agent_export(data, filename, mime) -> dict`, which returns
-    # `size`, not `bytes`. Reuse it as-is — restructuring a helper five
-    # working call sites depend on is out of scope here — and alias the
-    # field this tool's own schema promises.
-    meta = _save_agent_export(
-        blob, fname,
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    meta["bytes"] = meta["size"]
-    return meta
-
-
 def export_results_workbook(views: list | None = None, all: bool = False,  # noqa: A002 — the route's own name
                             stored: bool = False, filename: str | None = None,
                             run_id: str | None = None) -> dict:
@@ -9091,25 +8628,6 @@ def _congestion_at(n: Any, buses: list[str]) -> dict:
     return _explain.congestion_at(n, buses, get_results)
 
 
-def _explain_kpis(component_class: str, name: str) -> dict:
-    return get_asset_results(component_class, name, category="summary")
-
-
-def explain_investment(component_class: str, name: str) -> dict:
-    """
-    Assemble the evidence behind one sizing decision: what the LP built, WHICH
-    CONSTRAINT stopped it there, what the asset earned, and the system signals
-    it was priced against (`services/study/explain.py::explain_asset`, on the
-    active network).
-    """
-    try:
-        return _explain.explain_asset(
-            PyPSAService.get_network(), component_class, name,
-            results=get_results, asset_kpis=_explain_kpis)
-    except _explain.ExplainError as exc:
-        raise HTTPException(exc.status, exc.message) from None
-
-
 # ── Pre-dispatch validation (Improvement #19) ───────────────────────────────
 #
 # A validator answers one question about a destructive call BEFORE the user is
@@ -9556,6 +9074,23 @@ from services.chat_dispatchers.adequacy_studies import (  # noqa: E402,F401
     build_study_report,
 )
 
+from services.chat_dispatchers.explanation import (  # noqa: E402,F401
+    _explain_kpis,
+    explain_investment,
+)
+from services.chat_dispatchers.ui_control import (  # noqa: E402,F401
+    ui_select_component,
+    _PANEL_SECTIONS,
+    _PANEL_SECTION_ORDER,
+    ui_open_panel,
+    _loadflow_navigation_args,
+)
+from services.chat_dispatchers.asset_results import (  # noqa: E402,F401
+    _series_stats,
+    get_asset_results,
+    ui_open_asset_detail,
+    export_asset_results,
+)
 from services import reference_resolution as _reference_resolution  # noqa: E402
 from services import result_views as _result_views  # noqa: E402
 
@@ -9664,7 +9199,8 @@ DISPATCHERS: dict[str, Any] = {
     # explain_investment is the first one added that way — a real fusion of
     # the sizing bound, the registry's per-asset KPIs and the system-wide
     # price/CO2/congestion signals.
-    "explain_investment": explain_investment,
+    # Explanation: services/chat_dispatchers/explanation.py
+    **_DISPATCH_FRAGMENTS.splice("explanation"),
     # write_generic_crud (4)
     "create_component": create_component,
     "update_component": update_component,
@@ -9890,8 +9426,8 @@ DISPATCHERS: dict[str, Any] = {
     "undo_last": undo_last,
     "undo_status": undo_status,
     # ui_control (3)
-    "ui_select_component": ui_select_component,
-    "ui_open_panel": ui_open_panel,
+    # UI control: services/chat_dispatchers/ui_control.py
+    **_DISPATCH_FRAGMENTS.splice("ui_control"),
     "ui_set_snapshot": ui_set_snapshot,
     "ask_user": ask_user,
     "use_skill": use_skill,
@@ -9942,9 +9478,8 @@ DISPATCHERS: dict[str, Any] = {
     # uploads — bulk delete (1, locked decision row 7: independent of chat history)
     "clear_uploads": clear_uploads,
     # asset_results (3) — Task 14: per-asset results chat surface
-    "get_asset_results": get_asset_results,
-    "ui_open_asset_detail": ui_open_asset_detail,
-    "export_asset_results": export_asset_results,
+    # Asset results: services/chat_dispatchers/asset_results.py
+    **_DISPATCH_FRAGMENTS.splice("asset_results"),
     "export_results_workbook": export_results_workbook,
     # llm provider switching (1) — Task 10
     "set_active_profile": set_active_profile,

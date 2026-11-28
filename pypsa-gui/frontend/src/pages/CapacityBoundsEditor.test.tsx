@@ -49,3 +49,20 @@ describe('CapacityBoundsEditor empty state', () => {
     expect(empty.querySelector('a, button, code')).toBeNull()
   })
 })
+
+describe('read-only during a run (template-e2e 25)', () => {
+  it('disables the editor while the workbench is read-only', async () => {
+    const { useUIStore } = await import('../store/uiStore')
+    const { networkApi } = await import('../api/network')
+    vi.mocked(networkApi.getGenerators).mockResolvedValue(
+      [{ name: 'g1', carrier: 'gas', p_nom_extendable: true, p_nom: 1 }] as never)
+    useUIStore.getState().setSolvingReadOnly(true)
+    try {
+      render(<QueryClientProvider client={new QueryClient()}><CapacityBoundsEditor /></QueryClientProvider>)
+      const fs = await screen.findByTestId('bounds-fieldset') as HTMLFieldSetElement
+      expect(fs.disabled).toBe(true)
+    } finally {
+      useUIStore.getState().setSolvingReadOnly(false)
+    }
+  })
+})

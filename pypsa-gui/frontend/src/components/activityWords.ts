@@ -10,7 +10,6 @@ export const ACTIVITY_STATUS_WORDS: Record<string, string> = {
 
 /** Why a chat tool line reads "outcome unknown", where the reason helps (issue 04, `_outcome.reason`). */
 export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
-  adapter_pending: 'this kind of job cannot be checked yet',
   no_submission: 'no job from this call was found',
   unreadable: 'the result could not be read',
   // Issue 04 S2: a write's read-back.
@@ -31,6 +30,21 @@ export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
   not_as_requested: 'it changed the values, but not to what was asked',
   tool_timeout: 'no answer in time',
   tool_not_started: 'no answer in time',
+  // Issue 04 S7 (AA04-P12): wait_for_job on a study, report or queued job.
+  interrupted: 'it was interrupted before it finished',
+  status_unknown: 'its state could not be confirmed',
+  job_not_found: 'no such job was found',
+  other_project: 'that job belongs to another project',
+  other_job: 'the answer was for a different job',
+  read_failed: 'the job could not be checked',
+}
+
+/** Why a job reads "failed" or "stopping" (issue 04 S7, AA04-P12). */
+export const TOOL_OUTCOME_FAILED_REASON_WORDS: Record<string, string> = {
+  job_refused: 'the job was refused',
+}
+export const TOOL_OUTCOME_STOPPING_REASON_WORDS: Record<string, string> = {
+  stop_unconfirmed: 'the stop is not confirmed yet',
 }
 
 /**
@@ -73,16 +87,13 @@ export const TOOL_OUTCOME_DENIED_DETAIL_WORDS: Record<string, string> = {
   scene_apply_outcome_unknown: 'The 3D site change may not have landed. Check before trying again.',
 }
 
-/** A file tool's words where they differ from a job's (issue 04 S3: import/export). */
-export const TOOL_OUTCOME_FILE_REASON_WORDS: Record<string, string> = {
-  adapter_pending: 'this file format cannot be checked yet',
-}
-
 /** Why a write reads "partly done" when its count alone would mislead (issue 04 S3). */
 export const TOOL_OUTCOME_PARTIAL_REASON_WORDS: Record<string, string> = {
   extra_rows: 'the network has rows the file does not have',
   // Issue 04 S4b: a row write that also changed what it did not name.
   extra_edits: 'it also changed things it was not asked to',
+  // Issue 04 S7 (AA04-P12): a study that finished short of its goal.
+  target_not_met: 'it finished without reaching its target',
 }
 
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {

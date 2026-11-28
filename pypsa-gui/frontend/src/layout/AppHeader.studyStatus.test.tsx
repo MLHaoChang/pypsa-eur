@@ -3,7 +3,7 @@
 // the queue. It now reads the project's run (`useProjectRun`), queue job or
 // study, and says "Running…"; the run strip under the header has the details.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AppHeader from './AppHeader'
@@ -23,6 +23,14 @@ vi.mock('../hooks/useSolveQueue', () => ({
 let projectRun: RunView | null = null
 let hubStudy: EhStudyPayload | null = null
 vi.mock('../pages/hubDesign/useHubData', () => ({ useHubStudy: () => ({ study: hubStudy }) }))
+const verdict = vi.hoisted(() => ({ hasStudy: false, body: null as object | null, problem: null as string | null, mutate: vi.fn() }))
+vi.mock('../hooks/useVerdictStudyEntry', () => ({ useVerdictStudyEntry: () => ({ hasStudy: verdict.hasStudy }) }))
+vi.mock('../pages/hubDesign/useGoalStudy', () => ({
+  useGoalStudy: () => ({
+    built: { body: verdict.body }, vollMissing: false, problem: verdict.problem,
+    run: { mutate: verdict.mutate, isPending: false },
+  }),
+}))
 vi.mock('../hooks/useProjectRun', () => ({ useProjectRun: () => projectRun }))
 
 vi.mock('../auth/AuthModeProvider', () => ({
@@ -98,5 +106,101 @@ describe('AppHeader names the finished Guided study (template-e2e 46)', () => {
     hubStudy = { status: 'failed', finished_at: Date.UTC(2026, 10, 26, 13, 2) / 1000 }
     renderHeader()
     expect(screen.queryByTestId('header-run')).toBeNull()
+  })
+})
+
+// template-e2e 25: Expert during a Guided study is read-only and can abort it.
+const abortEhStudy = vi.fn(() => Promise.resolve({ status: 'aborting', aborting: true }))
+vi.mock('../api/simulation', async (orig) => {
+  const m = await orig<typeof import('../api/simulation')>()
+  return { ...m, resultsApi: { ...m.resultsApi, abortEhStudy: () => abortEhStudy() } }
+})
+
+describe('AppHeader during a Guided study (template-e2e 25)', () => {
+  it('offers Abort, locks the workbench and calls the study abort', async () => {
+    projectRun = study
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    const btn = await screen.findByRole('button', { name: /Abort/ })
+    expect(useUIStore.getState().solvingReadOnly).toBe(true)
+    fireEvent.click(btn)
+    await waitFor(() => expect(abortEhStudy).toHaveBeenCalledTimes(1))
+  })
+
+  it('shows Run, not Abort, when no study runs', () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    expect(screen.queryByRole('button', { name: /Abort/ })).toBeNull()
+    expect(useUIStore.getState().solvingReadOnly).toBe(false)
+  })
+})
+
+describe('one Run entry in Expert (template-e2e 17, TE2E-17-RUN-1)', () => {
+  it('runs the verdict study from the header Run, labelled Run study', async () => {
+    verdict.hasStudy = true; verdict.body = { goal: 1 }; verdict.mutate.mockClear()
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'p', readOnly: false } as never)
+    renderHeader()
+    const btn = await screen.findByRole('button', { name: /Run study/ }, { timeout: 10000 })
+    fireEvent.click(btn)
+    await waitFor(() => expect(verdict.mutate).toHaveBeenCalledTimes(1), { timeout: 10000 })
+    verdict.hasStudy = false; verdict.body = null
+  })
+
+  it('disables the header Run and names the reason while the study cannot start', async () => {
+    verdict.hasStudy = true; verdict.body = null; verdict.problem = 'No import connection set.'
+    verdict.mutate.mockClear()
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'p', readOnly: false } as never)
+    renderHeader()
+    expect((await screen.findByTestId('run-blocker', {}, { timeout: 10000 })).textContent).toBe('No import connection set.')
+    const btn = screen.getByRole('button', { name: /Run study/ }) as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    fireEvent.click(btn)
+    expect(verdict.mutate).not.toHaveBeenCalled()
+    verdict.hasStudy = false; verdict.problem = null
+  })
+
+  it('keeps the LOPF label where the project has no verdict study', async () => {
+    verdict.hasStudy = false
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    expect(await screen.findByTitle(/queues the solve/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Run study/ })).toBeNull()
+  })
+})
+
+describe('study abort feedback (UX 33 asks 2-4)', () => {
+  it('names the stage-boundary behaviour in the tooltip, and stays "Aborting…" until the study stops', async () => {
+    projectRun = study
+    useUIStore.setState({ uiMode: 'expert' })
+    const { rerender } = renderHeader()
+    const btn = await screen.findByRole('button', { name: /Abort/ })
+    expect(btn.getAttribute('title')).toBe('Stops at the next stage boundary; the network is left as it was.')
+    fireEvent.click(btn)
+    const aborting = await screen.findByRole('button', { name: /Aborting…/ })
+    expect((aborting as HTMLButtonElement).disabled).toBe(true)
+    // The POST has returned; the study still runs: still disabled.
+    await waitFor(() => expect(abortEhStudy).toHaveBeenCalled())
+    rerender(<QueryClientProvider client={new QueryClient()}><MemoryRouter><AppHeader /></MemoryRouter></QueryClientProvider>)
+    expect((screen.getByRole('button', { name: /Aborting…/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('toasts when the abort fails', async () => {
+    const toast = (await import('react-hot-toast')).default
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    abortEhStudy.mockRejectedValueOnce(new Error('boom'))
+    projectRun = study
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    fireEvent.click(await screen.findByRole('button', { name: /Abort/ }))
+    await waitFor(() => expect(err).toHaveBeenCalledWith('The study could not be stopped. Try again in a moment.'))
+  })
+})
+
+describe('Guided header with a study alone (UX 33)', () => {
+  it('shows no header Abort: the hub has its own', () => {
+    projectRun = study
+    useUIStore.setState({ uiMode: 'guided' })
+    renderHeader()
+    expect(screen.queryByRole('button', { name: /Abort|Aborting/ })).toBeNull()
   })
 })

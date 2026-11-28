@@ -41,9 +41,14 @@ describe('tool outcome marks', () => {
   })
 
   it.each([
-    ['adapter_pending', '– wait_for_job (outcome unknown: this kind of job cannot be checked yet)'],
+    ['interrupted', '– wait_for_job (outcome unknown: it was interrupted before it finished)'],
+    ['status_unknown', '– wait_for_job (outcome unknown: its state could not be confirmed)'],
+    ['job_not_found', '– wait_for_job (outcome unknown: no such job was found)'],
+    ['other_project', '– wait_for_job (outcome unknown: that job belongs to another project)'],
+    ['other_job', '– wait_for_job (outcome unknown: the answer was for a different job)'],
+    ['read_failed', '– wait_for_job (outcome unknown: the job could not be checked)'],
     ['no_submission', '– wait_for_job (outcome unknown: no job from this call was found)'],
-    ['read_failed', '– wait_for_job (outcome unknown)'],
+    ['some_future_reason', '– wait_for_job (outcome unknown)'],
   ])('words an unknown outcome with reason %s', (reason, line) => {
     expect(toolOutcomeLine('wait_for_job', block('uncertain', 'ad:1', reason))).toBe(line)
   })
@@ -214,21 +219,42 @@ describe('import and export outcomes (issue 04 S3)', () => {
       '– import_network_nc (partly done: the network has rows the file does not have)'],
     ['import_uploaded_network', 'uncertain', 'not_as_file', counts(7),
       '– import_uploaded_network (outcome unknown: the network does not match the imported file)'],
-    ['import_excel', 'uncertain', 'adapter_pending', null, '– import_excel (outcome unknown: this file format cannot be checked yet)'],
     ['export_network_nc', 'completed', null, null, '✓ export_network_nc (done)'],
     ['export_csv_bundle', 'uncertain', 'not_as_network', null,
       '– export_csv_bundle (outcome unknown: the exported file does not match the network)'],
     ['export_network_nc', 'uncertain', 'export_file_count', null,
       '– export_network_nc (outcome unknown: the exported file could not be identified)'],
-    ['export_matpower', 'uncertain', 'adapter_pending', null, '– export_matpower (outcome unknown: this file format cannot be checked yet)'],
   ])('words %s that read back %s (%s)', (tool, outcome, reason, c, line) => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome, reason, counts: c } }, tool)!
     expect(toolOutcomeLine(tool, block)).toBe(line)
   })
 
-  it('keeps the job words for a job that is adapter_pending', () => {
-    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'uncertain', job_id: 'ad:x', reason: 'adapter_pending' } }, 'wait_for_job')!
-    expect(toolOutcomeLine('wait_for_job', block)).toBe('– wait_for_job (outcome unknown: this kind of job cannot be checked yet)')
+  it.each([
+    ['StorageUnit', 2, '2 storage units'], ['StorageUnit', 1, '1 storage unit'], ['GlobalConstraint', 3, '3 global constraints'],
+    ['Store', 1, '1 store'], ['Carrier', 2, '2 carriers'], ['LineType', 2, '2 line types'], ['Bus', 2, '2 buses'],
+    ['series', 1, '1 time series'], ['series', 4, '4 time series'],
+  ])('words not-carried class %s x%i as "%s", never the class id', (cls, n, words) => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'completed', reason: null,
+      counts: { not_carried: [cls], not_carried_rows: { [cls]: n } } } }, 'export_matpower')!
+    expect(toolOutcomeLine('export_matpower', block)).toBe(`✓ export_matpower (done: the MATPOWER format cannot hold ${words})`)
+  })
+
+  it('words the S7 job reasons on their own states', () => {
+    const line = (outcome: string, reason: string) => toolOutcomeLine('wait_for_job',
+      toolOutcomeOf({ _outcome: { version: 1, outcome, job_id: 'ad:x', reason } }, 'wait_for_job')!)
+    expect(line('partial', 'target_not_met')).toBe('– wait_for_job (partly done: it finished without reaching its target)')
+    expect(line('failed', 'job_refused')).toBe('✕ wait_for_job (failed: the job was refused)')
+    expect(line('cancel_requested', 'stop_unconfirmed')).toBe('… wait_for_job (stopping: the stop is not confirmed yet)')
+  })
+
+  it('names what a MATPOWER export leaves out (AA04-P11), no raw ids', () => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'completed', reason: null,
+      counts: { not_carried: ['Store', 'series'], not_carried_rows: { Store: 2, series: 1 } } } }, 'export_matpower')!
+    expect(toolOutcomeLine('export_matpower', block))
+      .toBe('✓ export_matpower (done: the MATPOWER format cannot hold 2 stores · 1 time series)')
+    const none = toolOutcomeOf({ _outcome: { version: 1, outcome: 'completed', reason: null,
+      counts: { not_carried: [], not_carried_rows: {} } } }, 'export_matpower')!
+    expect(toolOutcomeLine('export_matpower', none)).toBe('✓ export_matpower (done)')
   })
 
   it('gives no partial word for a reason without one', () => {

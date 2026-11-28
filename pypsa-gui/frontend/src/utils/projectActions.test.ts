@@ -392,3 +392,18 @@ describe('lock-loss recovery', () => {
     expect(useUIStore.getState().readOnly).toBe(false)
   })
 })
+
+describe('abortRunningSim with a Guided study (template-e2e 25)', () => {
+  it('aborts a running study and waits for it to stop, though it holds no lock', async () => {
+    const { resultsApi, simulationApi } = await import('../api/simulation')
+    const { abortRunningSim } = await import('./projectActions')
+    const get = vi.spyOn(resultsApi, 'getEhStudy')
+      .mockResolvedValueOnce({ status: 'running' } as never)
+      .mockResolvedValue({ status: 'aborted' } as never)
+    const abort = vi.spyOn(resultsApi, 'abortEhStudy').mockResolvedValue({ status: 'x', aborting: true })
+    vi.spyOn(simulationApi, 'getLockStatus').mockResolvedValue({ lock_held: false, worker_alive: false })
+    expect(await abortRunningSim()).toBe(true)
+    expect(abort).toHaveBeenCalledTimes(1)
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+})

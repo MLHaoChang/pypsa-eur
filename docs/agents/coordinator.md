@@ -1,14 +1,14 @@
 # Coordinator
 
-Current coordinator session: `session_01G7qCumXhgyRE44fdm6eZVJ`
+Current coordinator session: `session_01G7qCunriTY8EtjkBgrheoB`
 
 Engine gatekeeper A (40; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCuiwc2tW9Cfhs6u2KPq`
 
-Engine gatekeeper B (75; harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCun53M96BG7SoHxwjSz`
+Engine gatekeeper B (76; harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCukjQ7Z2vcztvw6MSKi`
 
 Engine gatekeeper B2 (8; finance and business case, ui-modern, other app fixes, GC-09 and app-backend packages opened from 2026-11-17 04:00Z; owner decision GKB2-1): `session_01G7qCukxjo12ciTo5EWk1Hb`
 
-Engine gatekeeper A2 (8; grid-compliance packages GC-01..GC-08 and the PowerFactory DGS import; owner decisions GC-PACE-1, IMPORTS-1): `session_01G7qCukmdZJ8fY27LqoZyXi`
+Engine gatekeeper A2 (9; grid-compliance packages GC-01..GC-08 and the PowerFactory DGS import; owner decisions GC-PACE-1, IMPORTS-1): `session_01G7qCunnr36Ygr5q1bExx6t`
 
 Engine gatekeeper B3 (7; new template-e2e, ux-next, project-io app side, project-viewer-role and site-scene reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCukGR9V6wwzhok7Bgi3`
 

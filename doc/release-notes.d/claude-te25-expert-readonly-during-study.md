@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Expert now shows a running Guided study as a run: read-only editing (including Capacity bounds), Run disabled, and an Abort button; Guided Abort shows "Aborting…"; switching or deleting a project during a study aborts it first instead of failing with 409.
