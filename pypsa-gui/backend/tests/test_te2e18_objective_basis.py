@@ -237,3 +237,85 @@ def test_the_stamp_is_json_scalars_survives_a_save_and_leaves_the_fingerprint(
     n.export_to_netcdf(path)
     m = pypsa.Network(path)
     assert solve_discount(m) == solve_discount(n)
+
+
+def _assumed(tid, **over):
+    """`_apply_modelling_assumptions` on the template, with `over` on its config."""
+    from routers.projects import _solver_config_from_dict
+    from services.solver.assumptions import _apply_modelling_assumptions
+
+    n = T.BUILDERS[tid]()
+    n.snapshots.name = "snapshot"
+    cfg = dataclasses.replace(_solver_config_from_dict(T.solver_config(tid)), **over)
+    original = n.investment_period_weightings["objective"].copy()
+    restore, _ = _apply_modelling_assumptions(n, cfg, lambda _m: None)
+    return n, cfg, original, restore
+
+
+def test_the_strategy_is_stamped_with_the_discount_at_solve_start():
+    from services.solver.assumptions import SOLVE_DISCOUNT_META, SOLVE_STRATEGY_META
+
+    n, cfg, original, restore = _assumed("eh_h2_hub_staged", solve_strategy="rolling")
+    assert n.meta[SOLVE_STRATEGY_META] == "rolling"
+    applied = {int(p): f for p, f in n.meta[SOLVE_DISCOUNT_META]["factors"].items()}
+    assert applied == {
+        int(p): float(v) for p, v in n.investment_period_weightings["objective"].items()
+    }
+    restore()
+    assert n.investment_period_weightings["objective"].equals(original)
+    # A later solve with the discount off clears the stamp: never the previous solve's.
+    from services.solver.assumptions import _apply_modelling_assumptions
+
+    _apply_modelling_assumptions(
+        n, dataclasses.replace(cfg, auto_discount_periods=False), lambda _m: None
+    )
+    assert n.meta[SOLVE_DISCOUNT_META] is None
+
+
+def test_a_failure_part_way_restores_the_weights_and_stamps_none(monkeypatch):
+    from services.solver import assumptions
+    from services.solver.assumptions import SOLVE_DISCOUNT_META
+
+    real = assumptions.auto_discount_factors
+
+    class _Partial(dict):
+        """The factors with the last period's missing: the write fails after the first period."""
+
+        def __getitem__(self, k):
+            if k == max(self):
+                raise KeyError(k)
+            return super().__getitem__(k)
+
+    def short(n, cfg):
+        f = real(n, cfg)
+        return {**f, "factors": _Partial(f["factors"])}
+
+    monkeypatch.setattr(assumptions, "auto_discount_factors", short)
+    n, _cfg, original, restore = _assumed("eh_h2_hub_staged")
+    assert n.meta[SOLVE_DISCOUNT_META] is None
+    restore()
+    assert n.investment_period_weightings["objective"].equals(original)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"ref_year": "x", "real_rate": 0.05, "factors": {}},
+        {"real_rate": 0.05},
+        "nope",
+        3,
+    ],
+)
+def test_a_malformed_stamp_reads_unknown(raw, monkeypatch):
+    from services.solver.assumptions import (
+        SOLVE_DISCOUNT_META,
+        SOLVE_STRATEGY_META,
+        solve_discount,
+    )
+
+    n = T.BUILDERS["eh_h2_hub_staged"]()
+    n.meta[SOLVE_DISCOUNT_META] = raw
+    n.meta[SOLVE_STRATEGY_META] = "full"
+    assert solve_discount(n) == "unknown"
+    n.meta[SOLVE_STRATEGY_META] = "sideways"
+    assert _status_with(monkeypatch, n) == ("unknown", None)

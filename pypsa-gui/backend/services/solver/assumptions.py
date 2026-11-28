@@ -978,41 +978,40 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         #     Reference year = first period in the active list. Multi-period only.
         #     The weights applied are stamped on the network (`SOLVE_DISCOUNT_META`, from the
         #     same dict written into ipw) for readers that reconcile `n.objective` after the
-        #     weights are restored (template-e2e 18): null unless they were applied.
+        #     weights are restored (template-e2e 18): null unless they were applied. The
+        #     strategy is stamped beside it, so the pair always describes one solve.
         n.meta[SOLVE_DISCOUNT_META] = None
-        if (
-            cfg.auto_discount_periods
-            and cfg.multi_investment_periods
-            and isinstance(n.snapshots, pd.MultiIndex)
-            and len(n.investment_periods) > 0
-        ):
-            try:
-                disc = auto_discount_factors(n, cfg)
+        n.meta[SOLVE_STRATEGY_META] = str(getattr(cfg, "solve_strategy", "full"))
+        try:
+            disc = auto_discount_factors(n, cfg)
+            if disc is not None:
                 periods_active = sorted(disc["factors"])
                 r_nom = float(cfg.discount_rate or 0.0)
                 infl = float(getattr(cfg, "inflation_rate", 0.0) or 0.0)
                 r = disc["real_rate"]
                 ipw = n.investment_period_weightings
                 original_obj = ipw["objective"].copy()
-                new_factors: dict[int, float] = disc["factors"]
+
+                def _restore_ipw_objective(orig=original_obj):
+                    for p in orig.index:
+                        n.investment_period_weightings.at[p, "objective"] = float(orig.at[p])
+
+                # Registered before the first write, so a failure part-way still restores.
+                undo_actions.append(("call", _restore_ipw_objective))
                 for p in periods_active:
-                    ipw.at[p, "objective"] = new_factors[p]
+                    ipw.at[p, "objective"] = disc["factors"][p]
                 n.meta[SOLVE_DISCOUNT_META] = {
                     "ref_year": int(disc["ref_year"]), "real_rate": float(r),
-                    "factors": {str(p): float(new_factors[p]) for p in periods_active},
+                    "factors": {str(p): float(disc["factors"][p]) for p in periods_active},
                 }
                 infl_note = f", inflation_rate={infl:.3f}, real={r:.3f}" if infl != 0.0 else ""
                 phase(
                     f"Auto-discount: ipw.objective set to PV × years for {len(periods_active)} "
                     f"period(s) at discount_rate={r_nom:.3f}{infl_note}: " +
-                    ", ".join(f"{p}:{new_factors[p]:.3f}" for p in periods_active)
+                    ", ".join(f"{p}:{disc['factors'][p]:.3f}" for p in periods_active)
                 )
-                def _restore_ipw_objective(orig=original_obj):
-                    for p in orig.index:
-                        n.investment_period_weightings.at[p, "objective"] = float(orig.at[p])
-                undo_actions.append(("call", _restore_ipw_objective))
-            except Exception as exc:
-                phase(f"Auto-discount setup failed: {exc}. Periods stay at original weights.")
+        except Exception as exc:
+            phase(f"Auto-discount setup failed: {exc}. Periods stay at original weights.")
 
         # 5) Per-period × per-carrier load scaling. For each load column, look up
         #    its (canonical carrier, period) and multiply by the resolved factor.
