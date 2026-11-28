@@ -38,6 +38,7 @@ import { hasNoVerdict, NoVerdictNote } from '../noVerdict'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 import { Co2LimitRefusal } from '../../results/Co2LimitRefusal'
 import { WhyThisNumber } from './WhyThisNumber'
+import { AssumptionsBehindResult } from './AssumptionsBehindResult'
 
 
 // It names the figures it covers: the investment case's NPV and LCOE above carry their own state (UX 23).
@@ -214,6 +215,7 @@ export function ResultsCard() {
             </p>
             <WhyThisNumber figure="verdict" />
           </>)}
+          <AssumptionsBehindResult testId="hub-results-assumptions" />
           <NoVerdictNote templateId={template?.id} testId="hub-results-no-verdict" />
           {cheaper && (
             <p data-testid="hub-results-cheaper-duration" className="text-[12px] text-text">

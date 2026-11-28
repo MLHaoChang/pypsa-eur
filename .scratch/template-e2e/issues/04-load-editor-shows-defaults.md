@@ -3,7 +3,7 @@
 
 # 04 — The load editor shows profile-generator defaults, not the load; non-electric loads get MW; DC load inputs are creation-only
 
-Status: ready-for-agent
+Status: partly done (load editor opens on the load's shape and peak, peak in the bus unit; DC fields editable after creation open, asked of the coordinator)
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk (after #1565)
 Size: M
 Gated: UX
@@ -23,3 +23,6 @@ Journey fit: set up site (section 4) → readiness → results. Peaks per period
 - The peak field takes the carrier's unit (t/h, t/d, MW_H2…).
 - PUE, critical share, backup mode and (DC only) power architecture are editable after creation, in section 4 (load) or section 5 (backup and architecture), in both modes.
 - (UX) Where each moved decision lands: IT load, PUE and critical share in section 4 (on the load row); backup mode and power architecture (DC only) in section 5. The unit is part of the field label ("Peak load (t/h)").
+
+- Follow-up (UX 34, not blocking): the AddForm Demand and Energy capacity labels do not yet follow a tonne bus's unit.
+- Shots (harness render of LoadSeriesEditor with stubbed API): .scratch/template-e2e/shots/04-load-editor-{tonne-guided,tonne-expert,mw-guided,nh3-guided}.small.png

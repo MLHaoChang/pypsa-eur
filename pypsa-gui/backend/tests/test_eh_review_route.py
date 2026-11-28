@@ -116,7 +116,9 @@ def test_done_route_equals_tool_and_stale_follows_the_stored_report(
     # A later solve clears the stored report: the study record's copy is
     # reviewed and ``stale`` says so as a boolean.
     ctx.solver_state.pop(EH_REPORT_STORE_KEY, None)
-    assert client.get("/api/results/eh_reference_design").status_code == 204
+    # TE2E-16: the export route serves the study record's copy, not 204.
+    exp = client.get("/api/results/eh_reference_design")
+    assert exp.status_code == 200 and exp.json()["archetype"]
     r = client.get(REVIEW_URL)
     assert r.status_code == 200, r.text
     stale = r.json()

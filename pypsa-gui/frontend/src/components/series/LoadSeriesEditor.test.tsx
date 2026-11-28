@@ -125,7 +125,7 @@ describe('LoadSeriesEditor', () => {
     renderEditor('guided')
     expect(screen.getByRole('button', { name: /Preview/ })).toHaveProperty('disabled', true)
     expect(screen.getByTestId('disabled-reason').textContent).toBe('Enter a peak in MW to preview.')
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     expect(screen.queryByTestId('disabled-reason')).toBeNull()
   })
 
@@ -135,7 +135,7 @@ describe('LoadSeriesEditor', () => {
     api.generateLoad.mockResolvedValueOnce(withShare).mockResolvedValueOnce(PENDING)
     renderEditor('expert')
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     const line = await screen.findByTestId('stat-connection-share')
     expect(line.textContent).toBe('80 % of the grid connection')
@@ -154,7 +154,7 @@ describe('LoadSeriesEditor', () => {
     api.generateLoad.mockResolvedValue(PENDING)
     renderEditor('expert')
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     await userEvent.type(screen.getByLabelText('Shifts per day'), '3')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     await waitFor(() => expect(api.generateLoad).toHaveBeenCalledWith('Site A', {
@@ -171,8 +171,8 @@ describe('LoadSeriesEditor', () => {
     renderEditor()
     await screen.findByRole('option', { name: 'Industrial three shift' })
     await userEvent.selectOptions(screen.getByLabelText('Archetype'), 'industrial_three_shift')
-    await userEvent.click(screen.getByRole('button', { name: 'Annual MWh' }))
-    await userEvent.type(screen.getByLabelText('Annual MWh'), '5000')
+    await userEvent.click(screen.getByRole('button', { name: 'Annual energy (MWh)' }))
+    await userEvent.type(screen.getByLabelText('Annual energy (MWh)'), '5000')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     await waitFor(() => expect(api.generateLoad).toHaveBeenCalledWith('Site A', {
       archetype: 'industrial', loads: ['plant'],
@@ -186,7 +186,7 @@ describe('LoadSeriesEditor', () => {
       peak: 80, mean: 40, min: 20, before: { peak: 10, mean: 10, min: 10 }, warnings: [] })
     renderEditor()
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     await userEvent.click(await screen.findByRole('button', { name: /Apply to plant/ }))
     await waitFor(() => expect(api.apply).toHaveBeenCalledWith('Site A', { job_id: 'job-1', component: 'plant' }))
@@ -200,7 +200,7 @@ describe('LoadSeriesEditor', () => {
       warnings: ['not_applicable: network snapshots: snapshots must span one full calendar year'] })
     renderEditor()
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByRole('textbox', { name: 'Peak MW' }), '80')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Peak load (MW)' }), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     const btn = await screen.findByRole('button', { name: /Apply to plant/ })
     expect((btn as HTMLButtonElement).disabled).toBe(true)
@@ -215,7 +215,7 @@ describe('LoadSeriesEditor', () => {
       new: snaps.map((_, i) => (i === 10 ? 80 : 40)), current: snaps.map(() => 30) } } })
     renderEditor()
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByRole('textbox', { name: 'Peak MW' }), '80')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Peak load (MW)' }), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     const chart = await screen.findByTestId('week-chart')
     expect(chart.querySelector('figcaption')?.textContent).toBe('peak week: 14–20 Jan 2030')
@@ -245,7 +245,7 @@ describe('LoadSeriesEditor', () => {
       stats: { plant: { peak_mw: 75, annual_mwh: 420000, modelled_mwh: { total: 419000 } } } })
     renderEditor('expert')
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     await screen.findByTestId('refine-panel')
     await userEvent.selectOptions(screen.getByLabelText('Refinement'), 'scale_window')
@@ -270,9 +270,22 @@ describe('LoadSeriesEditor', () => {
       error_kind: 'invalid_archetype_params', message: 'state exactly one of peak_mw or annual_mwh' } } } })
     renderEditor()
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     expect((await screen.findByTestId('editor-error')).textContent).toContain('peak_mw or annual_mwh')
+  })
+})
+
+// TE-04: the editor opens on what the load carries.
+describe('LoadSeriesEditor opens on the load', () => {
+  it('shows the current shape and peak, and asks for the load\'s own unit', async () => {
+    api.current.mockResolvedValue({ exists: true, provenance: 'network', kind: 'commercial', rows: 168, peak: 485.85, unit: 't/h' })
+    renderEditor()
+    expect((await screen.findByTestId('current-series')).textContent).toContain('peak 485.85 t/h')
+    const field = await screen.findByLabelText('Peak load (t/h)')
+    expect(field.getAttribute('placeholder')).toBe('now 485.85')
+    expect((field as HTMLInputElement).value).toBe('')
+    await waitFor(() => expect((screen.getByLabelText('Archetype') as HTMLSelectElement).value).toBe('commercial'))
   })
 })
 
@@ -291,7 +304,7 @@ describe('LoadSeriesEditor replay of stored refinements', () => {
     const toggle = within(await screen.findByTestId('replay-toggle')).getByRole('checkbox')
     expect((toggle as HTMLInputElement).checked).toBe(true)
     expect(screen.getByTestId('replay-toggle').textContent).toContain('Keep its 2 refinements')
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     await waitFor(() => expect(api.generateLoad).toHaveBeenLastCalledWith('Site A', {
       archetype: 'industrial', loads: ['plant'], params: { peak_mw: 80 },
@@ -314,6 +327,7 @@ describe('LoadSeriesEditor replay of stored refinements', () => {
     api.current.mockResolvedValue({ ...REFINED, kind: 'commercial' })
     renderEditor()
     await screen.findByTestId('current-series')
+    await userEvent.selectOptions(await screen.findByLabelText('Archetype'), 'industrial')
     expect(screen.queryByTestId('replay-toggle')).toBeNull()
   })
 
@@ -326,7 +340,7 @@ describe('LoadSeriesEditor replay of stored refinements', () => {
     api.generateLoad.mockResolvedValueOnce(PENDING)
     renderEditor()
     await screen.findByRole('option', { name: 'Industrial' })
-    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    await userEvent.type(screen.getByLabelText('Peak load (MW)'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     const refused = await screen.findByTestId('replay-refused')
     expect(refused.textContent).toBe(

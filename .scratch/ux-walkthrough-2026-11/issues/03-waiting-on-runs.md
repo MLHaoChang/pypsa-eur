@@ -4,6 +4,7 @@
 # Waiting on a run: header says Idle, no ETA, long runs unbounded
 
 Status: ready-for-agent; audit 2026-11-25: #1614, #1627, #1630, #1716 merged (pill, ETA, wait); left: 409 Conflict cause, Guided-vs-Expert run wording
+- 2026-11-28: 409 cause = autosave tick during a queue job or Guided study (only legacy /run paused it); fixed.
 Model tier: sonnet
 Size: S
 Blocked by: #1627, #1630 merged

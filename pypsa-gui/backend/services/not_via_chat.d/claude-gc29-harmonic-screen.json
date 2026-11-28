@@ -1,0 +1,31 @@
+{
+ "entries": [
+  {
+   "id": "campus_background_harmonics",
+   "title": "Background harmonics measurement at the campus PCC",
+   "disposition": "manual",
+   "reason": "A measurement file (CSV) the user uploads in the app; chat cannot take a file. The connection inputs hold it, and the next campus run screens with it.",
+   "page": "Grid readiness, connection",
+   "panel": null,
+   "keywords": [
+    "background",
+    "harmonics",
+    "measurement"
+   ],
+   "routes": [
+    [
+     "GET",
+     "/api/campus-electrical/{name}/background-harmonics"
+    ],
+    [
+     "PUT",
+     "/api/campus-electrical/{name}/background-harmonics"
+    ],
+    [
+     "DELETE",
+     "/api/campus-electrical/{name}/background-harmonics"
+    ]
+   ]
+  }
+ ]
+}

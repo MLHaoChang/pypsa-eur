@@ -333,7 +333,7 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.queryByTestId('eh-abort')).toBeNull()
     // The goal, read-only, with "›" links to its editors (W3b-R).
     await waitFor(() => expect(screen.getByTestId('eh-goal-values').textContent)
-      .toBe('grid connection: strong — import whenever needed (default) · allowed shortfall not set · '
+      .toBe('grid connection: strong (default) · allowed shortfall not set · '
         + 'ENS target off · MC draws 500 (default)'))
     expect(screen.getByTestId('eh-archetype').textContent).toMatch(/^Strong grid: /)
     expect(screen.queryByRole('combobox', { name: /archetype/i })).toBeNull()
@@ -1169,18 +1169,46 @@ describe('P18 — pipeline table and whole-report export', () => {
       'eh-reference-design-strong_grid-01234567.json', exportBody))
   })
 
-  it('refuses both exports together when the stored report was cleared', async () => {
-    // A later foreground solve clears the stored report while the study
-    // record keeps its copy: the panel still shows it, but neither export
-    // may disagree with GET /eh_reference_design.
+  it('keeps both exports on after a later solve cleared the stored report (TE2E-16)', async () => {
+    // The study record keeps its copy and the route serves it, so the panel
+    // shows the report and both exports stay available.
     done()
-    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
     await openPanel()
-    expect((await screen.findByTestId('eh-report-not-stored')).textContent)
-      .toMatch(/cleared by a later solve/)
-    expect((screen.getByTestId('eh-report-json') as HTMLButtonElement).disabled).toBe(true)
+    expect(await screen.findByTestId('eh-report-json')).toBeTruthy()
+    expect(screen.queryByTestId('eh-report-not-stored')).toBeNull()
+    expect((screen.getByTestId('eh-report-json') as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByTestId('eh-report-summary-csv') as HTMLButtonElement).disabled)
-      .toBe(true)
+      .toBe(false)
+  })
+
+  it('says the export is the last run when a later solve cleared the stored report', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(
+      { ...WITH_PIPE, stale: true, edited_since_study: true } as never)
+    await openPanel()
+    const note = await screen.findByTestId('eh-report-stale')
+    expect(note.textContent).toMatch(/^Out of date: the network changed after the study ran/)
+    expect(note.className).toMatch(/text-warn/)
+  })
+
+  it('words the not-edited stale export as muted, without the edit warning', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(
+      { ...WITH_PIPE, stale: true, edited_since_study: false } as never)
+    await openPanel()
+    const note = await screen.findByTestId('eh-report-stale')
+    expect(note.textContent).toMatch(/^From the last study run, before the latest solve\./)
+    expect(note.className).toMatch(/text-muted/)
+    expect(note.className).not.toMatch(/text-warn/)
+  })
+
+  it('shows no stale note while the stored report is present', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(
+      { ...WITH_PIPE, stale: false, edited_since_study: false } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report-json')
+    expect(screen.queryByTestId('eh-report-stale')).toBeNull()
   })
 
   it('says so if the stored report vanished between render and click', async () => {

@@ -3,7 +3,7 @@
 
 # 08 — Run inputs that fall back to a default without saying so
 
-Status: ready-for-agent; audit 2026-11-25: #1645 merged (assumed values shown, VOLL fallback refuses); left: the Assumptions behind this result group (issue 26; no such string on master)
+Status: done; the Assumptions behind this result group landed with issue 26
 Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL
 Size: M
 Gated: GK B; UX

@@ -656,7 +656,10 @@ function ProjectSectionContent({
       // array means the interval isn't torn down + recreated on every
       // status flip (idle → running → completed). Cheap snapshot read.
       const simStatus = useSimulationStore.getState().status
-      if (simStatus === 'running') {
+      // A queue job or a Guided study solving this project (the header's
+      // `setSolvingReadOnly`) refuses a save with 409 too: the legacy
+      // `status` above only covers the direct /run path.
+      if (simStatus === 'running' || useUIStore.getState().solvingReadOnly) {
         appLog('INFO', 'Autosave paused — simulation running. Will resume after solve completes.')
         return
       }

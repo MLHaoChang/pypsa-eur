@@ -982,6 +982,11 @@ export interface EhFmeaTopMode {
 /** Durable product artifact from GET /results/eh_reference_design. */
 export interface EhReferenceDesignReport {
   archetype: EhArchetype
+  /** Export route only: true when a later solve cleared the stored report and this
+   *  is the study record's copy (the review's `stale`). */
+  stale?: boolean
+  /** Export route only: the study record's `edited_since_study`. */
+  edited_since_study?: boolean | null
   pack_hash: string
   assumptions_hash: string
   ens_cap_permyriad?: number | null

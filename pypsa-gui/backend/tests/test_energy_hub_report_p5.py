@@ -442,6 +442,49 @@ def test_get_eh_reference_design_payload_204_when_missing():
     assert body is None
 
 
+def test_export_falls_back_to_the_study_record_after_a_later_solve():
+    """TE2E-16: the stored report is cleared by a later solve; the study
+    record's copy still exports, flagged stale. Not while it runs."""
+    report = ReferenceDesignReport(
+        archetype="strong_grid", pack_hash="a", assumptions_hash="b"
+    )
+    rec = {
+        "status": "done",
+        "edited_since_study": False,
+        "report": report.model_dump(mode="json", by_alias=True),
+    }
+    body, status = R.eh_reference_design_http_payload({}, rec)
+    assert status == 200
+    assert body["stale"] is True and body["edited_since_study"] is False
+    stored, _ = R.eh_reference_design_http_payload(
+        {R.EH_REPORT_STORE_KEY: report.model_dump(mode="json")}, rec
+    )
+    assert stored["stale"] is False
+    keys = {"stale", "edited_since_study"}
+    assert {k: v for k, v in body.items() if k not in keys} == {
+        k: v for k, v in stored.items() if k not in keys
+    }
+    # No record given: the plain export shape, no flags.
+    plain, _ = R.eh_reference_design_http_payload(
+        {R.EH_REPORT_STORE_KEY: report.model_dump(mode="json")}
+    )
+    assert keys.isdisjoint(plain)
+    assert (
+        R.eh_reference_design_http_payload({}, {**rec, "status": "running"})[1] == 204
+    )
+    assert R.eh_reference_design_http_payload({}, {"status": "done"})[1] == 204
+
+
+def test_one_record_rule_for_export_and_review():
+    """Every non-running status that holds a report exports and reviews."""
+    rep = {"archetype": "strong_grid"}
+    for status in ("done", "failed", "aborted", "partial"):
+        assert R.record_report({"status": status, "report": rep}) is rep
+    assert R.record_report({"status": "running", "report": rep}) is None
+    assert R.record_report({"status": "done", "report": None}) is None
+    assert R.record_report(None) is None
+
+
 def _fmea_report(rows, class_a_rows):
     sections = empty_section_map(default="skipped")
     sections["fmea_top"] = SectionState(

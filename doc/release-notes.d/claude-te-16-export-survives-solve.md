@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The Energy Hub study's JSON and CSV export stays available after a later solve clears the stored report; the export now falls back to the study record's copy, and the plain-words tooltip replaces the raw route name.

@@ -3,7 +3,7 @@
 
 # 26 — Assumed inputs are labelled only in the report, not in Guided or Expert results
 
-Status: ready-for-agent
+Status: done
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results → report (template-e2e 08 is built elsewhere; this is the results half).

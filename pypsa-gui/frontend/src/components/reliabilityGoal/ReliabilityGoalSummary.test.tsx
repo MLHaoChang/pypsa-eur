@@ -29,6 +29,14 @@ describe('ReliabilityGoalSummary: an assumed goal (walkthrough asset-investment 
     expect(screen.getByTestId('g-assumed-source').textContent).toBe('site type default')
   })
 
+  it('names the site type by its short word, with no second colon', () => {
+    state.goal = goal({ site_archetype: ['off_grid', 'stored'] })
+    render(<ReliabilityGoalSummary items={['site']} testId="g" />)
+    const t = screen.getByTestId('g-values').textContent ?? ''
+    expect(t).toContain('grid connection: none, an island')
+    expect(t.match(/:/g)).toHaveLength(1)
+  })
+
   it('has no chip for a set goal, nor for a non-number assumed value (GK B 65 C9)', () => {
     state.goal = withAssumed(3, goal({ target_lole_h: [1.5, 'stored'] }))
     render(<ReliabilityGoalSummary items={['target']} testId="g" />)
