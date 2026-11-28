@@ -280,7 +280,7 @@ def _refused(project, status, kind, field, **kw):
 def test_the_size_cap_is_named_and_refused_with_413(drafted):
     pad = b"x" * (1024 * 1024 - len(CSV) + 1)  # the literal cap: 1 MiB
     msg = _refused(drafted, 413, "campus_background_too_large", "file", data=CSV + pad)
-    assert msg.startswith("File:")
+    assert msg == "File: larger than 1 MB"
 
 
 @pytest.mark.parametrize(
@@ -421,3 +421,18 @@ def test_a_campus_that_names_no_pcc_bus_is_a_422(drafted):
         and e.value.detail["error_kind"] == "campus_background_no_campus"
     )
     assert "PCC bus" in e.value.detail["message"]
+
+
+def test_an_upload_without_a_filename_is_stored(drafted):
+    got = _put(drafted, filename=None)
+    assert got["has_background"] and got["filename"] is None
+
+
+def test_an_error_without_a_message_is_named_by_its_type(drafted, monkeypatch):
+    def broken(*a, **kw):
+        raise RuntimeError()
+
+    monkeypatch.setattr(ce.cs, "harmonics_campus", broken)
+    assert ce.run(drafted, SETTINGS)["results"]["harmonic_emission"] == {
+        "error": "RuntimeError"
+    }
