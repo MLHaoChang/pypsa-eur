@@ -5455,7 +5455,7 @@ def _route(handler, *args, **kwargs):
         try:
             return _without_owner_email(handler(*args, **{**injected, **kwargs}))
         except HTTPException as exc:
-            raise _unnamed_view_only(exc) from exc
+            raise _unnamed_view_only(exc) from None
 
 
 def _without_owner_email(value):
