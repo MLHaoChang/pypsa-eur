@@ -58,11 +58,19 @@ function notCarriedOf(raw: unknown): Record<string, number> | null {
   return Object.keys(out).length ? out as Record<string, number> : null
 }
 
-/** What an export left out, in words (AA04-P11). Null when nothing. */
+/** A component class as plain words, singular or plural: "StorageUnit" → "storage unit(s)". */
+function classNoun(cls: string, n: number): string {
+  if (cls === 'series') return 'time series'
+  const words = cls.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase()
+  if (n === 1) return words
+  return /(s|x|ch|sh)$/.test(words) ? `${words}es` : words.replace(/([^aeiou])y$/, '$1ie') + 's'
+}
+
+/** What an export left out, in words (AA04-P11): "the MATPOWER format cannot hold 2 stores · 1 time series". Null when nothing. */
 export function notCarriedWords(block: ToolOutcomeBlock): string | null {
   if (toolOutcomeMark(block.outcome).outcome !== 'completed' || !block.notCarried) return null
-  const parts = Object.entries(block.notCarried).map(([cls, n]) => `${cls === 'series' ? 'time series' : cls} ${n}`)
-  return `the file format leaves out: ${parts.join(', ')}`
+  const parts = Object.entries(block.notCarried).map(([cls, n]) => `${n} ${classNoun(cls, n)}`)
+  return `the MATPOWER format cannot hold ${parts.join(' · ')}`
 }
 
 /** The tools whose ordinary-turn result always carries `_outcome` (backend harness/outcomes.py JOB_TOOLS). */

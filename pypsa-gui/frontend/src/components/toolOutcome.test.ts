@@ -229,6 +229,16 @@ describe('import and export outcomes (issue 04 S3)', () => {
     expect(toolOutcomeLine(tool, block)).toBe(line)
   })
 
+  it.each([
+    ['StorageUnit', 2, '2 storage units'], ['StorageUnit', 1, '1 storage unit'], ['GlobalConstraint', 3, '3 global constraints'],
+    ['Store', 1, '1 store'], ['Carrier', 2, '2 carriers'], ['LineType', 2, '2 line types'], ['Bus', 2, '2 buses'],
+    ['series', 1, '1 time series'], ['series', 4, '4 time series'],
+  ])('words not-carried class %s x%i as "%s", never the class id', (cls, n, words) => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'completed', reason: null,
+      counts: { not_carried: [cls], not_carried_rows: { [cls]: n } } } }, 'export_matpower')!
+    expect(toolOutcomeLine('export_matpower', block)).toBe(`✓ export_matpower (done: the MATPOWER format cannot hold ${words})`)
+  })
+
   it('words the S7 job reasons on their own states', () => {
     const line = (outcome: string, reason: string) => toolOutcomeLine('wait_for_job',
       toolOutcomeOf({ _outcome: { version: 1, outcome, job_id: 'ad:x', reason } }, 'wait_for_job')!)
@@ -241,7 +251,7 @@ describe('import and export outcomes (issue 04 S3)', () => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'completed', reason: null,
       counts: { not_carried: ['Store', 'series'], not_carried_rows: { Store: 2, series: 1 } } } }, 'export_matpower')!
     expect(toolOutcomeLine('export_matpower', block))
-      .toBe('✓ export_matpower (done: the file format leaves out: Store 2, time series 1)')
+      .toBe('✓ export_matpower (done: the MATPOWER format cannot hold 2 stores · 1 time series)')
     const none = toolOutcomeOf({ _outcome: { version: 1, outcome: 'completed', reason: null,
       counts: { not_carried: [], not_carried_rows: {} } } }, 'export_matpower')!
     expect(toolOutcomeLine('export_matpower', none)).toBe('✓ export_matpower (done)')

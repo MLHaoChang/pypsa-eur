@@ -185,9 +185,9 @@ describe('chat tool-line outcome marks', () => {
         counts: { not_carried: ['Store', 'series'], not_carried_rows: { Store: 2, series: 1 } },
         notice: 'MATPOWER holds only some fields' } } })
     expect(screen.getByTestId('chat-tool-outcome').textContent)
-      .toBe('✓export_matpower (done: the file format leaves out: Store 2, time series 1)')
+      .toBe('✓export_matpower (done: the MATPOWER format cannot hold 2 stores · 1 time series)')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
-    expect(screen.getByTestId('chat-tool-label').textContent).toContain('the file format leaves out: Store 2, time series 1')
+    expect(screen.getByTestId('chat-tool-label').textContent).toContain('the MATPOWER format cannot hold 2 stores · 1 time series')
   })
 
   it('shows a partly done write with its count in both modes', async () => {
