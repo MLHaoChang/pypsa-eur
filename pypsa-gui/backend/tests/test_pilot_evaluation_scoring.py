@@ -246,3 +246,21 @@ def test_concurrent_attempts_share_one_budget():
     with ThreadPoolExecutor(max_workers=5) as pool:
         assert sum(pool.map(attempt, range(10))) == 1
     assert meter.requests == 1
+
+
+def test_a_raw_model_name_fails_a_live_reply_and_is_counted_in_both_modes():
+    """expert-catalogue 05: the scorer counts catalogue model names a reply
+    shows as written; a live (model-written) reply with one fails the report."""
+    results = passing_results()
+    before = report(results)["metrics"]["deterministic"]["raw_model_names"]["count"]
+    clean = next(r for r in results if not r["raw_names"])
+    clean["raw_names"] = ["p_nom"]  # as a checked answer's method note may (issue 12)
+    value = report(results)
+    assert value["passed"]
+    assert value["metrics"]["deterministic"]["raw_model_names"]["count"] == before + 1
+    from harness.pilot_evaluation import GOLDEN_CASES
+
+    live = [dict(r, mode="live", raw_names=[]) for r in results if r["case_id"] in {c.id for c in GOLDEN_CASES}]
+    assert report(results + live, live=True)["passed"]
+    live[0]["raw_names"] = ["p_nom"]
+    assert not report(results + live, live=True)["passed"]

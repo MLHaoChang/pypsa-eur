@@ -3,7 +3,7 @@
 
 # A read-only project viewer role
 
-Status: ready-for-agent; audit 2026-11-19: PR 1 backend merged (#1622); PR 2 open in #1718
+Status: ready-for-agent; audit 2026-11-28: PR 1 backend merged (#1622), PR 2a backend merged (#1718, 2026-11-21); left: the UI sweep (2b/2c), tracked in `05-viewer-and-sharing-ui.md`
 Type: task
 Source: owner decisions LC48C-ROLE-1 (2026-11-14), VIEWER-ROLE-1 (2026-11-17, build it now), from LC-48c (`.scratch/live-copilot/issues/48c-undo-rebind-viewer-rows.md`)
 
@@ -146,3 +146,7 @@ PR 2 splits per PR-SIZE-1: **2a** backend (members role, `my_access`, read-only 
 
 - GK B3 GO for 2a with V1–V8: write the role explicitly (new member → editor, absent entry keeps the stored role); validate roles (422 bad value, 400 key outside `user_ids` or not a UUID); a self role change is a plain 400; a demotion bites on the next request; `my_access` only from `project_role`; the chat offer uses the same predicate as `require_allowed`, with a catalogue-wide parity test on both wires; the prompt line is a `harness/prompts/` fragment; Journey fit and targeted mutants in the PR body.
 - UX 24 (now UX 25) GO for 2b with eight conditions: one read-only line, "View only: ask the project owner for edit access.", which wins over the run strip's line; a sweep list in the PR body, including the Guided assistant buttons; no "Autosave on · 5 min" for a viewer; the members picker as a radiogroup with a visible key and fixed rows; toast "This project is view only."; the chat declines in plain words; Journey fit; light and dark shots in Guided and Expert.
+
+## Audit (2026-11-28)
+
+- 2026-11-28 audit: #1718 is merged (not open, not stale): members role route, `my_access`, read-only chat offer and the `LC-D22.viewer_role` fixture are on master. Runners re-reading the role is `02` (done, #1806, #1848). Nothing is left in this file; the visible read-only state (UX 25's eight conditions, `useProjectAccess`) is `05-viewer-and-sharing-ui.md`, which was blocked by #1718 and is now unblocked. Close this issue as `done` when `05` merges. Model for 05: opus, GK B3 + UX.

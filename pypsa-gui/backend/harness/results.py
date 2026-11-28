@@ -180,6 +180,11 @@ def _error_result_content(detail: Any, exc: BaseException | None, error_kind: st
     if isinstance(detail, dict):
         message = detail.get("message")
         free_text = str(message) if message is not None else None
+        plain, field = detail.get("plain_name"), detail.get("field")
+        if free_text and isinstance(plain, str) and isinstance(field, str):
+            # A write tool's refusal about one column opens with its plain name
+            # (expert-catalogue 05, `services/chat_plain_names.py`).
+            free_text = f"{plain} ({field}): {free_text}"
     elif detail is not None:
         free_text = str(detail)
     elif exc is not None:

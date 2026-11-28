@@ -3,10 +3,10 @@
 
 # P3: verified action outcomes and real progress
 
-Status: ready-for-agent; S6 (2026-11-27, `claude/aa04-s6-file-formats`) turns the `_pending` file rows P1-P7 into passing cases, P8 stays a named limit, P10 closed by issue 15; S7 (2026-11-27, `claude/aa04-s7-job-outcomes`) maps wait_for_job on `ad:`/`rpt:`/queue jobs from job_adapters' neutral view (passing); left: P11 and the S7 reason words (UI), mismatched artifacts (issue 05)
+Status: ready-for-agent; audit 2026-11-28: S1-S7 and the UI slice (P11, P12, `claude/aa04-ui-outcome-words`) are done; left: P13 (a superseded queue solve reads cancelled; backend, GK B) and mismatched artifacts (issue 05); P8 stays a named limit
 Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
-Blocked by: none (01 and 02 done; live-voice 11a and 11b merged, #1548; only the nonblocking-job cases of the test matrix wait for live-voice 11c, the versioned job events)
+Blocked by: none (live-voice 11a, 11b and 11c are merged; the nonblocking-job cases are covered by S7)
 
 Read the [spec](../spec.md), [test matrix](../test-plan.md),
 [plan](../../../docs/superpowers/plans/2026-10-10-assistant-answer-assurance.md)
@@ -503,3 +503,7 @@ start (GK B (74) NOT OK @af90b669). Test:
 test_a_queue_cancel_is_confirmed_only_by_its_kind.
 Pending (UI): AA04-P12, the new reasons' tool-line words, with P11; that slice
 also drops the now-unused `adapter_pending` words.
+
+## Audit (2026-11-28)
+
+- 2026-11-28 audit: the matrix marks AA04-P11 and AA04-P12 passed (UI slice, 2026-11-28); the old line 'Pending (UI): AA04-P12' is stale. Only AA04-P13 is a pending candidate (GK B 74, not blocking S7): an `aborted` solve that a newer enqueue superseded must read cancelled in `wait_for_job`. Left: P13 as one small backend slice with a plan to GK B; mismatched artifacts belong to issue 05. Model: sonnet for P13.

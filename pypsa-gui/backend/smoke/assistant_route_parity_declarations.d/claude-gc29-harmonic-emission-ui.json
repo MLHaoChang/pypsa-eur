@@ -1,0 +1,19 @@
+{
+  "limitations": [
+    {
+      "method": "GET",
+      "path": "/api/campus-electrical/{name}/background-harmonics",
+      "reason": "binary-transfer"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/campus-electrical/{name}/background-harmonics",
+      "reason": "binary-transfer"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/campus-electrical/{name}/background-harmonics",
+      "reason": "binary-transfer"
+    }
+  ]
+}

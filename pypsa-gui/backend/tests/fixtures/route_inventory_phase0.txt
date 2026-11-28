@@ -55,6 +55,7 @@ POST    /api/campus-electrical/{name}/milp                                      
 POST    /api/campus-electrical/{name}/milp/cancel                                  -> cancel_milp_api_campus_electrical__name__milp_cancel_post
 GET     /api/campus-electrical/{name}/owner-assets                                 -> owner_assets_api_campus_electrical__name__owner_assets_get
 POST    /api/campus-electrical/{name}/run                                          -> run_api_campus_electrical__name__run_post
+GET     /api/catalogue                                                             -> get_catalogue_api_catalogue_get
 DELETE  /api/changelog/                                                            -> clear_changelog_api_changelog__delete
 GET     /api/changelog/                                                            -> get_changelog_api_changelog__get
 GET     /api/chat/access                                                           -> chat_access_api_chat_access_get

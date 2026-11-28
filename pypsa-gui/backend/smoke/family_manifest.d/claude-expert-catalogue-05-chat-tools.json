@@ -1,0 +1,6 @@
+{
+ "tool_families": {
+  "find_parameter": "network-topology",
+  "open_parameter": "ui-monitoring"
+ }
+}

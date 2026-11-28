@@ -165,7 +165,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 
 /** The flow items whose Guided drawer shows a grid-readiness limit line: item field → row kind. */
 const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'],
-  connection_limit: ['connection_limit'] }
+  connection_limit: ['connection_limit'], background_harmonics: ['background_harmonics'] }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column

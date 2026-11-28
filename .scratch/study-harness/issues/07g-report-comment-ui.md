@@ -3,9 +3,9 @@
 
 # 07g — Report comments in the report viewer: create and withdraw
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-28: unblocked (07d PR B merged, #1746); left: the whole UI (create and withdraw in the report viewer), UX placement first
 Type: task
-Blocked by: 07d PR B (the run card's drafts list)
+Blocked by: none (07d PR B merged as #1746 on 2026-11-20; PR A is #1649)
 Gated: yes (UX; GK B for any route change)
 Model tier: opus
 Owner decisions: SH07C-DRAFT-1
@@ -30,3 +30,7 @@ Split from: [07d](07d-report-revision-drafts.md), PR B scope (coordinator, 2026-
 ## Likely files
 
 `pypsa-gui/frontend/src/pages/reports/`, `pypsa-gui/frontend/src/api/reports.ts`, tests beside them
+
+## Audit (2026-11-28)
+
+- 2026-11-28 audit: 07d is `done (#1746)` and `components/runMonitor/RevisionDrafts.tsx` is on master, so the blocker is gone. `api/reports.ts` has `listReportComments` only; no create or withdraw call and no comment screen in `pages/reports/`. Left: everything in the acceptance list, including the chat disposition of the comments read (still `held-by-spec` on this issue). Order: UX placement (the reports page is a workflow surface), then the build. Model tier unchanged: opus.
