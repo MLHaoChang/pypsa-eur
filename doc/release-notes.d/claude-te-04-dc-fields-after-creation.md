@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A data-centre project's PUE at design, critical share, backup mode and power architecture can be changed after creation (`PUT /api/campus-electrical/{name}/dc-load`). A PUE or critical-share change rewrites the IT and cooling load on the open project in one undo step, refuses while a study runs, and asks before replacing a load series that was edited.

@@ -12,6 +12,7 @@ Backup mode and architecture move nothing in the network (the saved network
 keeps the backup strings it was built with; ``dc_backup.assess`` reads the
 stored mode), so they change the marker only.
 """
+
 from __future__ import annotations
 
 #: The patch keys; anything else (the IT MW, the phases) stays a creation input.
@@ -23,13 +24,17 @@ _LOADS = ["it_load", "cooling"]
 class DcLoadUpdateError(ValueError):
     """A refused update: ``kind`` is the error kind, ``field`` the input at fault."""
 
-    def __init__(self, message: str, field: str | None = None, kind: str = "dc_load_invalid"):
+    def __init__(
+        self, message: str, field: str | None = None, kind: str = "dc_load_invalid"
+    ):
         super().__init__(message)
         self.field = field
         self.kind = kind
 
 
-def update_dc_load(project_dir, tpl, patch: dict, network=None, *, overwrite_series: bool = False) -> dict:
+def update_dc_load(
+    project_dir, tpl, patch: dict, network=None, *, overwrite_series: bool = False
+) -> dict:
     """Apply ``patch`` to the stored spec and, when PUE or critical share
     moved, to ``network``'s it_load and cooling series. Returns
     ``{"spec": <stored spec>, "series_changed": bool}``.
@@ -38,7 +43,12 @@ def update_dc_load(project_dir, tpl, patch: dict, network=None, *, overwrite_ser
     which refuses a PUE or critical-share change). A series that no longer
     matches what the stored spec produces was edited by the user: it is
     refused (``dc_series_edited``) unless ``overwrite_series``."""
-    from services.adequacy.dc_backup import DcBackupError, _meta, _write_meta, project_spec
+    from services.adequacy.dc_backup import (
+        DcBackupError,
+        _meta,
+        _write_meta,
+        project_spec,
+    )
     from services.dc_load_profile import DcLoadError
     from services.template_marker import write_lock
 
@@ -46,7 +56,9 @@ def update_dc_load(project_dir, tpl, patch: dict, network=None, *, overwrite_ser
     if unknown or not patch:
         raise DcLoadUpdateError(
             f"dc_load: only {', '.join(PATCH_KEYS)} can change after creation"
-            + (f" (not {', '.join(unknown)})" if unknown else ""), unknown[0] if unknown else None)
+            + (f" (not {', '.join(unknown)})" if unknown else ""),
+            unknown[0] if unknown else None,
+        )
     try:
         tid, spec, planning = project_spec(project_dir, tpl)
     except DcBackupError as exc:
@@ -55,7 +67,9 @@ def update_dc_load(project_dir, tpl, patch: dict, network=None, *, overwrite_ser
     for key, value in patch.items():
         if key == "backup":
             if not isinstance(value, dict):
-                raise DcLoadUpdateError("dc_load.backup: must be an object", "dc_load.backup")
+                raise DcLoadUpdateError(
+                    "dc_load.backup: must be an object", "dc_load.backup"
+                )
             raw["backup"] = {**raw.get("backup", {}), **value}
         else:
             raw[key] = value
@@ -65,18 +79,30 @@ def update_dc_load(project_dir, tpl, patch: dict, network=None, *, overwrite_ser
         raise DcLoadUpdateError(str(exc), exc.field) from None
 
     series_changed = any(
-        getattr(checked, k) != getattr(spec, k) for k in _SERIES_KEYS if k in patch)
+        getattr(checked, k) != getattr(spec, k) for k in _SERIES_KEYS if k in patch
+    )
     saved = None
     if series_changed:
-        if network is None or "it_load" not in network.loads_t.p_set.columns \
-                or "cooling" not in network.loads_t.p_set.columns:
+        if (
+            network is None
+            or "it_load" not in network.loads_t.p_set.columns
+            or "cooling" not in network.loads_t.p_set.columns
+        ):
             raise DcLoadUpdateError(
-                "dc_load: open the project to change PUE or critical share", None, "project_not_open")
+                "dc_load: open the project to change PUE or critical share",
+                None,
+                "project_not_open",
+            )
         saved = network.loads_t.p_set[_LOADS].copy()
-        if not overwrite_series and not _matches_spec(network, tpl, tid, spec, planning, saved):
+        if not overwrite_series and not _matches_spec(
+            network, tpl, tid, spec, planning, saved
+        ):
             raise DcLoadUpdateError(
                 "dc_load: the IT load or cooling series was edited since creation; "
-                "changing PUE or critical share would replace it", None, "dc_series_edited")
+                "changing PUE or critical share would replace it",
+                None,
+                "dc_series_edited",
+            )
         try:
             tpl.apply_dc_profile_to_network(network, tid, checked, planning)
         except Exception:
