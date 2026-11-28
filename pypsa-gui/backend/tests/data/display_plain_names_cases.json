@@ -56,6 +56,67 @@
    "why": "a component id that looks like snake_case is not a model name and stays raw",
    "text": "Rename the generator `wind_farm` and the bus `grid_bus_1`.",
    "want": "Rename the generator `wind_farm` and the bus `grid_bus_1`."
+  },
+  {
+     "why": "a name inside a longer identifier the user typed is not one the user asked about",
+     "user": "what is e_nom_x or my_e_nom or e_nom2?",
+     "text": "`e_nom` is the size.",
+     "want": "Energy capacity is the size."
+  },
+  {
+     "why": "a one-word key is not a snake_case model name and stays raw",
+     "text": "Set `efficiency` and `bus`.",
+     "want": "Set `efficiency` and `bus`."
+  },
+  {
+     "why": "a fence opened with four spaces is not a fence",
+     "text": "    ```\n`e_nom`",
+     "want": "    ```\nEnergy capacity"
+  },
+  {
+     "why": "an indented line does not close a fence",
+     "text": "```\n    ```\n`e_nom`\n```",
+     "want": "```\n    ```\n`e_nom`\n```"
+  },
+  {
+     "why": "a tilde line does not close a backtick fence",
+     "text": "```\n~~~\n`e_nom`\n```",
+     "want": "```\n~~~\n`e_nom`\n```"
+  },
+  {
+     "why": "a shorter fence does not close a longer one",
+     "text": "````\n```\n`e_nom`\n````",
+     "want": "````\n```\n`e_nom`\n````"
+  },
+  {
+     "why": "a longer fence closes a shorter one",
+     "text": "```\n`e_nom`\n`````\n`e_nom`",
+     "want": "```\n`e_nom`\n`````\nEnergy capacity"
+  },
+  {
+     "why": "a fence line with text after it does not close",
+     "text": "```\n``` x\n`e_nom`\n```",
+     "want": "```\n``` x\n`e_nom`\n```"
+  },
+  {
+     "why": "an indented quote marker is still a quote",
+     "text": "  > `e_nom`",
+     "want": "  > `e_nom`"
+  },
+  {
+     "why": "a blank line of spaces ends a quote",
+     "text": "> q\n   \n`e_nom`",
+     "want": "> q\n   \nEnergy capacity"
+  },
+  {
+     "why": "a trailing newline is kept",
+     "text": "`e_nom`\n",
+     "want": "Energy capacity\n"
+  },
+  {
+     "why": "the opening fence line itself is never replaced",
+     "text": "~~~ `e_nom`\n~~~",
+     "want": "~~~ `e_nom`\n~~~"
   }
  ]
 }
