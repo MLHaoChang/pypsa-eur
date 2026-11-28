@@ -569,3 +569,25 @@ def test_a_whole_body_schema_refusal_stays_raw():
     )
     with pytest.raises(ValidationError):
         wrapped("Generator", "G1", {"p_nom": 1})
+
+
+def test_assets_narrow_to_the_asset_type_and_name_each_one_s_type():
+    n = pypsa.Network()
+    n.add("Bus", "B1", carrier="AC")
+    n.add("Generator", "pv", bus="B1", carrier="solar", p_nom=3)
+    n.add("Generator", "gen", bus="B1", carrier="diesel", p_nom=4)
+    entry, _ = lookup.resolve("generator.capacity")
+    every = {a["name"]: a["asset_type"] for a in PA.assets(n, entry, None)}
+    assert every["pv"] == "pv" and every["gen"] == "thermal"
+    assert [a["name"] for a in PA.assets(n, entry, "pv")] == ["pv"]
+    assert PA.assets(n, entry, "bess") == []
+
+
+def test_a_parameter_without_a_unit_reads_as_no_unit():
+    from types import SimpleNamespace
+
+    n = pypsa.Network()
+    n.add("Bus", "B1", carrier="AC")
+    n.add("Generator", "g", bus="B1", p_nom=1)
+    spec = SimpleNamespace(key="committable", unit_display="", scale=1.0)
+    assert PA._unit_on(n, "Generator", "g", spec) == (None, 1.0)
