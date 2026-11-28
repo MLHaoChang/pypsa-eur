@@ -197,6 +197,7 @@ def test_background_used_is_written_when_there_is_none_g4(drafted):
         (ce.campus_dir(drafted) / "run" / ce.BACKGROUND_USED_FILE).read_text()
     )
     assert used == {"status": "none", "record_sha256": "none"}
+    assert ce.get_state(drafted)["stale"] is False  # none taken, none stored
     _put(drafted)
     assert ce.get_state(drafted)["stale"] is True  # a measurement added after the run
 
