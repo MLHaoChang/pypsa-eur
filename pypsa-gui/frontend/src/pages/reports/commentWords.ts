@@ -17,6 +17,9 @@ export const COMMENT_REFUSAL_WORDS: Record<string, string> = {
   report_comment_not_found: 'This comment is no longer there: reload the report.',
 }
 
+/** The part chosen before a reload is not in the version now shown. */
+export const COMMENT_PART_GONE = 'That part is no longer in the latest version: choose another part.'
+
 export function commentRefusalWords(kind: string | null | undefined, message: string | null | undefined): string {
   return (kind && COMMENT_REFUSAL_WORDS[kind]) || draftRefusalWords(kind, message)
 }

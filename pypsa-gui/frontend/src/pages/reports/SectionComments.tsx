@@ -14,7 +14,7 @@ import type { Block, CommentAnchor, ReportComment, ReportDocument, Section } fro
 import { addReportComment, isReportError, withdrawReportComment } from '../../api/reports'
 import { Tag } from '../../components/PageKit'
 import { DRAFT_REASON_WORDS } from '../../components/runMonitor/runWords'
-import { MAX_COMMENT_CHARS, commentRefusalWords } from './commentWords'
+import { COMMENT_PART_GONE, MAX_COMMENT_CHARS, commentRefusalWords } from './commentWords'
 
 /** Rows shown before the list folds (#1332). */
 export const COMMENTS_FOLD_AT = 5
@@ -74,7 +74,7 @@ export function anchorWords(anchor: CommentAnchor, section: Section, doc: Report
 const ORDER: Record<ReportComment['status'], number> = { open: 0, addressed: 1, withdrawn: 2 }
 
 function StatusTag({ c }: { c: ReportComment }) {
-  if (c.status === 'open') return <Tag tone="accent">Open</Tag>
+  if (c.status === 'open') return <Tag tone="purple">Open</Tag>
   if (c.status === 'addressed') {
     return <Tag tone="ok">{c.revision ? `Addressed in v${c.revision.version}` : 'Addressed'}</Tag>
   }
@@ -125,7 +125,7 @@ function CommentRow({
         {mine && c.status === 'open' && !confirming && (
           <button
             type="button"
-            className="ml-auto underline text-muted hover:text-text"
+            className="ml-auto underline text-text hover:text-accent"
             onClick={() => { setConfirming(true); setRefusal(null) }}
             data-testid="comment-withdraw"
           >
@@ -285,7 +285,7 @@ export function SectionComments({
           {(refusal || anchorGone) && (
             <p role="status" className="flex items-center gap-2 text-[11px] text-warn" data-testid="comment-refusal">
               <span>{anchorGone && refusal?.kind !== 'revision_stale_base'
-                ? commentRefusalWords('report_comment_anchor_invalid', null)
+                ? COMMENT_PART_GONE
                 : refusal?.words}</span>
               {(refusal?.kind === 'revision_stale_base' || refusal?.kind === 'report_comment_anchor_invalid') && (
                 <button

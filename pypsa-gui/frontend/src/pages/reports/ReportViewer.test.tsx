@@ -699,10 +699,20 @@ describe('ReportViewer — report comments (07g)', () => {
     await waitFor(() => expect(api.addReportComment).toHaveBeenCalledWith(
       'Demo', REPORT_ID, 'Lead with the cost.', expect.objectContaining({ section_id: expect.any(String) }), 'd1'))
     expect((await screen.findByTestId('comment-refusal')).textContent).toMatch(/changed after you opened it/)
-    const reads = api.listReportComments.mock.calls.length
+    // The reload brings a real new version: the comments read again under a new key.
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    api.getReport.mockResolvedValue({ ...FIXTURE, version: 2 })
+    api.listReportComments.mockImplementation(() => gate.then(() => ({ ...COMMENTS_EMPTY, latest_version: 2, digest: 'd2' })))
     await user.click(screen.getByTestId('comment-reload'))
-    await waitFor(() => expect(api.listReportComments.mock.calls.length).toBeGreaterThan(reads))
-    expect((screen.getByTestId('comment-text') as HTMLTextAreaElement).value).toBe('Lead with the cost.')
+    await waitFor(() => expect(screen.getByText('v2')).toBeTruthy())
+    release()
+    const box = await screen.findByTestId('comment-text') as HTMLTextAreaElement
+    expect(box.value).toBe('Lead with the cost.')
+    api.addReportComment.mockResolvedValueOnce({})
+    await user.click(screen.getByTestId('comment-submit'))
+    await waitFor(() => expect(api.addReportComment).toHaveBeenLastCalledWith(
+      'Demo', REPORT_ID, 'Lead with the cost.', expect.anything(), 'd2'))
   })
 
   it('on an older version says comments go on the latest, and the line switches to it', async () => {

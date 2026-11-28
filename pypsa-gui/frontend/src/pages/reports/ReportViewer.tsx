@@ -52,7 +52,7 @@
 // server); a PDF export downloads but is not previewed (docx-preview reads
 // Word files only).
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, Eye, FileDown, FileText, GitCompareArrows,
 } from 'lucide-react'
@@ -177,6 +177,9 @@ export function ReportViewer({
     queryFn: () => listReportComments(project, meta.report_id),
     enabled: !!doc.data,
     retry: false,
+    // Keep the last read while a new version's comments load, so a section's
+    // comments stay mounted and a typed draft survives a Reload (UX 34, change 2).
+    placeholderData: keepPreviousData,
   })
   const canComment = version === null && !!doc.data && comments.data?.latest_version === doc.data.version
   function commentsChanged(message: string) {
@@ -292,16 +295,6 @@ export function ReportViewer({
               >
                 <AlertTriangle size={11} aria-hidden="true" /> evidence changed since v{shownVersion}
               </span>
-            )}
-            {version !== null && version !== meta.latest_version && (
-              <button
-                type="button"
-                className="underline text-muted hover:text-text"
-                onClick={() => setVersion(null)}
-                data-testid="comments-latest-only"
-              >
-                Comments go on the latest version (v{meta.latest_version}) ›
-              </button>
             )}
           </span>
         }
@@ -468,6 +461,19 @@ export function ReportViewer({
           aborting={job.aborting}
           onAbort={() => { job.abort().catch(e => toast.error(reportJobErrorMessage(e))) }}
         />
+      )}
+
+      {version !== null && version !== meta.latest_version && (
+        <p className="text-[11px] text-muted">
+          <button
+            type="button"
+            className="underline text-text hover:text-accent"
+            onClick={() => setVersion(null)}
+            data-testid="comments-latest-only"
+          >
+            Comments go on the latest version (v{meta.latest_version}) ›
+          </button>
+        </p>
       )}
 
       {doc.data && doc.data.sections.map(section => (

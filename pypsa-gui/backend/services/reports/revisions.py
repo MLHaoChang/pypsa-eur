@@ -728,8 +728,8 @@ def add_comment(
             raise RevisionError(
                 "revision_stale_base",
                 409,
-                "The report changed after it was opened, so the comment was not "
-                "saved. Reload the latest version and post it again.",
+                "The report changed after you opened it: your comment was not saved. "
+                "Reload the report and post it again.",
             )
         found = _anchored(doc, anchor)
         if found is None:
