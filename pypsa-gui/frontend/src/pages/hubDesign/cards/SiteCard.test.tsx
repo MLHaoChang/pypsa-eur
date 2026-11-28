@@ -322,9 +322,9 @@ describe('SiteCard labels', () => {
     const select = screen.getByTestId('hub-site-type') as HTMLSelectElement
     expect(screen.getByRole('combobox', { name: /Grid connection/ })).toBe(select)
     expect(Array.from(select.options).map(o => [o.value, o.textContent])).toEqual([
-      ['strong_grid', 'Strong — import whenever needed'],
+      ['strong_grid', 'Strong: import whenever needed'],
       ['weak_flexible', 'Weak or limited'],
-      ['off_grid', 'None — the site runs as an island'],
+      ['off_grid', 'None: the site runs as an island'],
     ])
     expect(screen.queryByText('Site type')).toBeNull()
   })
