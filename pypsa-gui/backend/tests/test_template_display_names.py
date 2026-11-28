@@ -271,3 +271,19 @@ def test_the_names_stay_out_of_the_fingerprint_and_the_saved_bytes(
     assert _names(client) == {}
     assert fps() == with_names
     assert sorted(p.name for p in project_storage_dir(name).iterdir()) == saved
+
+
+def test_no_display_name_reads_as_a_raw_snake_case_id():
+    """RAW-NAMES-1: a plain name never shows a snake_case id or a `__` internal name."""
+    import re
+
+    from services.template_display_names import DISPLAY_NAMES
+
+    snake = re.compile(r"\b[a-z]+(_[a-z0-9]+)+\b|__")
+    bad = [
+        f"{tid}/{cls}/{cid}: {name}"
+        for tid, rows in DISPLAY_NAMES.items()
+        for (cls, cid), name in rows.items()
+        if snake.search(name)
+    ]
+    assert not bad, bad

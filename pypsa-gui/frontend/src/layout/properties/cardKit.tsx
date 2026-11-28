@@ -10,6 +10,7 @@ import { useCatalog } from '../../hooks/useCatalog'
 import { useGuideField } from '../../components/GuidedTour'
 import { editScope, loadExtras, saveExtras } from '../../utils/extrasStore'
 import type { SolveMode } from '../../utils/attributeCatalog'
+import { ehRoleLabel } from '../../plainNames'
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   X, Plus, Zap, Battery, Database, GitBranch,
@@ -661,7 +662,7 @@ export function autofillNomMin(nomKey: string, minKey: string) {
   }
 }
 
-export function SelInput({ label, k, fs, set, options, tip }: { label: string; k: string; fs: FS; set: SetFS; options: string[]; tip?: string }) {
+export function SelInput({ label, k, fs, set, options, tip, optionLabel }: { label: string; k: string; fs: FS; set: SetFS; options: string[]; tip?: string; optionLabel?: (id: string) => string }) {
   const current = fs[k] ?? ''
   const allOpts = current && !options.includes(current) ? [current, ...options] : options
   return (
@@ -674,7 +675,7 @@ export function SelInput({ label, k, fs, set, options, tip }: { label: string; k
         onChange={e => set(p => ({ ...p, [k]: e.target.value }))}
         className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-accent w-full"
       >
-        {allOpts.map(o => <option key={o} value={o}>{o}</option>)}
+        {allOpts.map(o => <option key={o} value={o}>{optionLabel && o ? optionLabel(o) : o}</option>)}
       </select>
     </label>
   )
@@ -1092,11 +1093,11 @@ export function EhBusInputs({ fs, set, poc = false }: { fs: FS; set: SetFS; poc?
 }
 
 export function EhLinkInputs({ fs, set }: { fs: FS; set: SetFS }) {
-  const tip = useGuideField('eh_role', 'grid_import marks the Link the archetype packs cap or island. Conversion roles identify electrolysers / fuel cells for redundancy scenarios.')
+  const tip = useGuideField('eh_role', 'Grid import marks the Link the archetype packs cap or island. Conversion roles identify electrolysers / fuel cells for redundancy scenarios.')
   return (
     <div data-testid="eh-link-role" className="col-span-2">
       <SelInput label="Energy Hub role" k="eh_role" fs={fs} set={set}
-        options={[...EH_LINK_ROLES]} tip={tip} />
+        options={[...EH_LINK_ROLES]} tip={tip} optionLabel={ehRoleLabel} />
     </div>
   )
 }
