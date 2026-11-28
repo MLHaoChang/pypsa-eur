@@ -2880,9 +2880,10 @@ def get_background(project) -> dict:
         try:
             meta, _ = _background_stored(d)
         except (OSError, ValueError) as exc:
+            logger.warning("background harmonics: the stored measurement in %s cannot be read: %s", d, exc)
             raise HTTPException(status_code=409, detail={
                 "error_kind": "campus_background_unreadable",
-                "message": f"The stored measurement cannot be read ({exc}): remove it and upload it again.",
+                "message": "The stored measurement cannot be read: remove it and upload it again.",
             }) from exc
         return _background_view(meta, campus_dir(project) / "run")
 
@@ -2972,8 +2973,9 @@ def _take_background(project, work: Path) -> dict:
         try:
             meta, data = _background_stored(d)
         except (OSError, ValueError) as exc:
+            logger.warning("campus run: the stored background measurement in %s cannot be read: %s", d, exc)
             meta, data = None, None
-            reason = f"the stored measurement cannot be read ({exc}); remove it and upload it again"
+            reason = "the stored measurement cannot be read; remove it and upload it again"
     if reason is not None:
         out = {"status": "unusable", "record_sha256": "unreadable", "reason": reason}
     elif meta is None:
@@ -2993,7 +2995,9 @@ def _take_background(project, work: Path) -> dict:
                                                      "upload it again")
             else:
                 out.update(status="used", citation=bh.citation(rec))
-    (work / BACKGROUND_USED_FILE).write_text(json.dumps(out))
+    from services.atomic_io import atomic_write_text
+
+    atomic_write_text(work / BACKGROUND_USED_FILE, json.dumps(out))
     return out
 
 

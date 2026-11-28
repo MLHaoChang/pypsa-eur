@@ -24,6 +24,8 @@ CAMPUS_FILES = {
     "campus_electrical/run/campus_compliance_invested.csv": "check,status_with_measures\npcc_reactive,pass\n",
     "campus_electrical/run/campus_invest_scope.json": '{"pcc_switchgear": "campus"}',
     "campus_electrical/island_study.json": '{"cost_of_seamless": 1000.0}',
+    "campus_electrical/background/measurement.csv": "order,u_h_pct_p95\n5,1.0\n",
+    "campus_electrical/background/meta.json": '{"source": "survey"}',
 }
 NOT_CARRIED = {
     "campus_electrical/settings.json": "{}",
@@ -57,6 +59,8 @@ def test_the_tuple_names_the_services_files():
     for const in (ce.cs.INVESTMENT_CSV, ce.cs.COST_CSV, ce.cs.COMPLIANCE_INVESTED_CSV, ce.cs.INVEST_SCOPE_JSON):
         assert f"{campus_dir}/run/{const}" in _BUNDLE_CAMPUS_FILES, const
     assert f"{campus_dir}/{ce.ISLAND_STUDY_FILE}" in _BUNDLE_CAMPUS_FILES
+    for name in (ce.BACKGROUND_DATA, ce.BACKGROUND_META):
+        assert f"{campus_dir}/{ce.BACKGROUND_DIR}/{name}" in _BUNDLE_CAMPUS_FILES, name
     assert set(_BUNDLE_CAMPUS_FILES) == set(CAMPUS_FILES)
 
 

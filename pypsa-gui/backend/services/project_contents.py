@@ -143,6 +143,9 @@ TABLE: tuple[Entry, ...] = (
             "run/campus_compliance_invested.csv",
             "run/campus_invest_scope.json",
             "island_study.json",
+            # The background harmonics measurement the user uploaded, and its record (grid-compliance 29).
+            "background/measurement.csv",
+            "background/meta.json",
         )
     ),
     Entry("uploads", DIR, FOLDER, _ALL, "chat uploads"),

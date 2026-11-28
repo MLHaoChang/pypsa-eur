@@ -247,6 +247,10 @@ def test_an_unreadable_store_breaks_the_pin(drafted):
         e.value.status_code == 409
         and e.value.detail["error_kind"] == "campus_background_unreadable"
     )
+    assert (
+        e.value.detail["message"]
+        == "The stored measurement cannot be read: remove it and upload it again."
+    )
 
 
 # ── the upload (D4) ──────────────────────────────────────────────────────────
@@ -407,6 +411,10 @@ def test_a_record_that_is_not_an_object_reads_unreadable(drafted):
         e.value.status_code == 409
         and e.value.detail["error_kind"] == "campus_background_unreadable"
     )
+    assert (
+        e.value.detail["message"]
+        == "The stored measurement cannot be read: remove it and upload it again."
+    )
 
 
 def test_a_campus_that_names_no_pcc_bus_is_a_422(drafted):
@@ -446,6 +454,9 @@ def test_a_store_unreadable_at_run_time_reads_unknown_and_stale(drafted):
     emission = _run(drafted)
     assert emission["background"]["status"] == "unusable"
     assert "cannot be read" in emission["background"]["reason"]
+    assert (
+        str(ce.campus_dir(drafted)) not in emission["background"]["reason"]
+    )  # no path reaches the user
     (row,) = _with_bg(emission)
     assert row["verdict"] == "unknown" and "cannot be read" in row["note"]
     used = json.loads(
@@ -459,3 +470,29 @@ def test_the_view_says_when_it_was_uploaded(drafted):
     got = _put(drafted)
     assert got["uploaded_at"].startswith("20") and got["measured_on"] == "2026-10-03"
     assert ce.get_background(drafted)["uploaded_at"] == got["uploaded_at"]
+
+
+def test_the_bundled_files_carry_the_background_to_a_copy_d5(drafted, user_and_db):  # noqa: F811
+    """GK A2 on #2132: the files a bundle carries (``_BUNDLE_CAMPUS_FILES``) take the measurement with them,
+    so a copy's next run screens with it instead of silently without."""
+    import shutil
+
+    from routers.projects import _BUNDLE_CAMPUS_FILES
+
+    _put(drafted)
+    db, user = user_and_db
+    copy = project_registry.create_root(db, user, "Campus Hub Copy")
+    src, dst = (
+        project_registry.project_dir(drafted),
+        project_registry.ensure_project_dir(copy),
+    )
+    shutil.copy(src / ce.NETWORK_FILE, dst / ce.NETWORK_FILE)
+    for rel in _BUNDLE_CAMPUS_FILES:
+        if (src / rel).is_file():
+            (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src / rel, dst / rel)
+    emission = _run(copy)
+    assert emission["background"]["status"] == "used"
+    (row,) = _with_bg(emission)
+    assert row["u_h_pct"] is not None
+    assert ce.get_background(copy)["source"] == "Utility measurement"

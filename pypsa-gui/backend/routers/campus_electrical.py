@@ -544,7 +544,8 @@ async def put_background_harmonics(
 ):
     """A field measurement (CSV of harmonic order and % of the nominal fundamental) with who measured it and
     when; checked now against the campus PCC, taken by the next campus run. At most the cap plus one byte is
-    read: anything longer is refused unread."""
+    read into memory, so the service refuses anything longer by its length (the server has already spooled the
+    body by then)."""
     _check_lock(proj, db, user)
     data = await file.read(ce.MAX_BACKGROUND_BYTES + 1)
     return await run_in_threadpool(ce.put_background, _row(proj, db), data, source, measured_on, file.filename)
