@@ -72,7 +72,7 @@ import {
   type RoundTripResponse,
 } from '../../api/reports'
 import { getUploadBlobUrl, type UploadMeta } from '../../api/uploads'
-import { useAuthUserEmail } from '../../auth/AuthProvider'
+import { useAuthUserEmail } from '../../auth/authContext'
 import { Btn, PageSection, Tag } from '../../components/PageKit'
 import { DocxPreview } from './DocxPreview'
 import { MappingPlanEditor } from './MappingPlanEditor'
