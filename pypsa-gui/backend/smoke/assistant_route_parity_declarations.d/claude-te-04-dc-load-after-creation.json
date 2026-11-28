@@ -1,0 +1,1 @@
+{"limitations": [{"method": "PUT", "path": "/api/campus-electrical/{name}/dc-load", "reason": "ui-pointer", "decision": "DC20-POINTER-1"}]}
