@@ -1,0 +1,4 @@
+{"limitations": [
+ {"method": "GET", "path": "/api/projects/{name}/report-variants", "reason": "held-by-spec",
+  "issue": ".scratch/business-case/issues/19-report-variants.md"}
+]}

@@ -425,3 +425,55 @@ def test_generate_is_refused_under_a_foreign_lock(client, api_project, session_s
         assert r.json()["detail"]["error_kind"] == "project_locked"
     # Nothing was stored by the refused call.
     assert client.get(f"/api/projects/{name}/reports").json() == []
+
+
+def test_variant_report_stores_the_variant_the_section_and_survives_a_regenerate(
+        client, api_project, session_state, monkeypatch):
+    """Business-case 19 (V4): top_npv n=2 stores the variant on the document and the job
+    record, writes the Option ranking section and its table, a regenerate keeps them, and
+    a standard report stores no variant key."""
+    import routers.studies as studies
+    from services.study import option_ranking as OR
+
+    figs = [{"option_id": o, "label": o.upper(), "npv": n, "irr": i, "irr_reason": None}
+            for o, n, i in (("a", 10.0, 0.1), ("b", 30.0, 0.2), ("c", None, None))]
+    monkeypatch.setattr(
+        studies, "ranking_for_study",
+        lambda project, sid, db, variant, n: __import__("dataclasses").replace(
+            OR.rank(figs, variant, n), study_id=sid))
+    monkeypatch.setattr(studies, "report_variants",
+                        lambda project, db: {"study_id": "s1", "rankable_npv": 3,
+                                             "rankable_irr": 2, "stale": False,
+                                             "stale_reasons": []})
+    name = api_project("gen-variant")
+    _store_eh_report(session_state(client))
+    _install_provider(monkeypatch, FakeProvider(_script()))
+    r = client.post(f"/api/projects/{name}/reports/generate",
+                    json={"sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"],
+                          "variant": "top_npv", "n": 2})
+    assert r.status_code == 200, r.text[:300]
+    rid = r.json()["report_id"]
+    body = _poll(client, name)
+    assert body["status"] == "done" and body["variant"] == {
+        "variant": "top_npv", "n": 2, "study_id": "s1"}, body
+    doc = client.get(f"/api/projects/{name}/reports/{rid}").json()
+    assert doc["variant"] == {"variant": "top_npv", "n": 2, "study_id": "s1"}
+    assert [s["section_id"] for s in doc["sections"]].count("option_ranking") == 1
+    table = doc["tables"]["option_ranking"]
+    assert [row[1] for row in table["rows"][:2]] == ["B", "A"] and len(table["rows"]) == 3
+    assert "Shows all 2 options" in table["caption"] and table["rows"][2][0] == "—"
+
+    _install_provider(monkeypatch, FakeProvider([_draft("fmea_top", "Shorter.")]))
+    assert client.post(f"/api/projects/{name}/reports/{rid}/sections/fmea_top/regenerate",
+                       json={}).status_code == 200
+    assert _poll(client, name)["status"] == "done"
+    again = client.get(f"/api/projects/{name}/reports/{rid}").json()
+    assert again["version"] == 2 and again["variant"] == doc["variant"]
+    assert again["tables"]["option_ranking"] == table
+
+    _install_provider(monkeypatch, FakeProvider(_script()))
+    rid2 = client.post(f"/api/projects/{name}/reports/generate",
+                       json={"sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"]}).json()["report_id"]
+    assert _poll(client, name)["status"] == "done"
+    plain = client.get(f"/api/projects/{name}/reports/{rid2}").json()
+    assert "variant" not in plain and "option_ranking" not in plain["tables"]

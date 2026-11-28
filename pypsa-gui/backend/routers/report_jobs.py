@@ -95,6 +95,11 @@ class GenerateReportBody(BaseModel):
     # AA-05 Y1: each declared summary section and the section ids whose
     # evidence facts it may quote in a strict job.
     summaries: list[SummaryDeclaration] | None = None
+    # business-case 19: "top_npv" (with n, 1..10, default 3) or "greatest_irr", ranked over
+    # the decision study `study_id` (default: the newest with an assembled report).
+    variant: str | None = None
+    n: int | None = None
+    study_id: str | None = None
 
 
 class ProposeMappingBody(BaseModel):
@@ -235,11 +240,33 @@ def _summaries(declared: list[SummaryDeclaration] | None) -> dict[str, list[str]
     return out
 
 
+def _option_ranking(project: AuthorizedProject, db: DBSession, body: GenerateReportBody):
+    """The body's report variant as a ranking (business-case 19), or None for the standard
+    report. A stray `n` or `study_id` without a variant refuses as an unknown variant does."""
+    from routers import studies
+    from services.study import option_ranking as OR
+
+    if body.variant is None:
+        if body.n is not None or body.study_id is not None:
+            raise HTTPException(422, {"error_kind": "report_variant_invalid",
+                                      "message": "n and study_id go with a report variant."})
+        return None
+    try:
+        OR.check_request(body.variant, body.n)
+    except OR.VariantError as exc:
+        raise HTTPException(exc.status, {"error_kind": exc.kind, "message": exc.message}) from None
+    study_id = body.study_id or studies.report_variants(project, db)["study_id"]
+    if study_id is None:
+        raise HTTPException(422, {"error_kind": "report_variant_too_few_options",
+                                  "message": "No compared options: run a study first."})
+    return studies.ranking_for_study(project, study_id, db, body.variant, body.n)
+
+
 _NO_LLM_KINDS = ("missing_api_key", "sdk_not_installed")
 
 
 def _plain_report_if_no_llm(project: AuthorizedProject, profile: Any,
-                            body: GenerateReportBody) -> dict | None:
+                            body: GenerateReportBody, option_ranking: Any = None) -> dict | None:
     """TE2E-16-PLAIN-1: with no usable LLM profile (`missing_api_key` or
     `sdk_not_installed` only), Generate report stores the plain evidence-only
     report built from the stored results (no key needed) and answers
@@ -260,11 +287,22 @@ def _plain_report_if_no_llm(project: AuthorizedProject, profile: Any,
     if err not in _NO_LLM_KINDS:
         return None
     evidence, figure_pngs = _evidence_for(project)
-    stored = store_evidence_only_report(project, evidence, figure_pngs, body.title)
+    stored = store_evidence_only_report(project, evidence, figure_pngs, body.title,
+                                        option_ranking=option_ranking)
     return {"status": "done", "report_id": stored["report_id"], "mode": "plain"}
 
 
 # ── routes ──────────────────────────────────────────────────────────────────
+
+
+@router.get("/{name}/report-variants")
+def report_variants(project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db)) -> dict:
+    """What Generate report may offer as variants (business-case 19): the newest study with an
+    assembled report, how many options carry an NPV or an IRR, and whether its compare is stale."""
+    from routers import studies
+
+    return studies.report_variants(project, db)
 
 
 @router.post("/{name}/reports/generate")
@@ -290,8 +328,9 @@ def generate_report(body: GenerateReportBody,
                              "template_language": outline.language},
         }
         language = language or outline.language
+    option_ranking = _option_ranking(project, db, body)
     profile = _resolve_profile()
-    plain = _plain_report_if_no_llm(project, profile, body)
+    plain = _plain_report_if_no_llm(project, profile, body, option_ranking)
     if plain is not None:
         return plain
     provider = _provider_or_400(profile)
@@ -300,7 +339,8 @@ def generate_report(body: GenerateReportBody,
         project, user_id=user.id if user else None, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
         provider=provider, language=language or "en",
         sections=body.sections, instruction=body.instruction, title=body.title,
-        summaries=_summaries(body.summaries), **template_kwargs)
+        summaries=_summaries(body.summaries), option_ranking=option_ranking,
+        **template_kwargs)
     return {"status": "running", "report_id": report_id}
 
 

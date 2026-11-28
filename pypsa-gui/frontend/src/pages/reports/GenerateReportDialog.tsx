@@ -27,7 +27,10 @@ import { useEffect, useId, useState, type FormEvent } from 'react'
 import { Sparkles, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { AddLlmProfileLink, isNoLlmRefusal, toastReportRefusal } from './llmProfileLink'
-import { reportChartErrorMessage, reportJobErrorMessage, type GenerateReportOptions } from '../../api/reports'
+import {
+  getReportVariants, reportChartErrorMessage, reportJobErrorMessage,
+  type GenerateReportOptions, type ReportVariant, type ReportVariantsInfo,
+} from '../../api/reports'
 import { listUploads, type UploadMeta } from '../../api/uploads'
 import { Dialog } from '../../components/Dialog'
 import { Btn } from '../../components/PageKit'
@@ -80,6 +83,8 @@ export function GenerateReportDialog({
   const [instruction, setInstruction] = useState('')
   const [templateId, setTemplateId] = useState('')
   const [templates, setTemplates] = useState<UploadMeta[]>([])
+  const [variant, setVariant] = useState<ReportVariant | ''>('')
+  const [variants, setVariants] = useState<ReportVariantsInfo | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errorSource, setErrorSource] = useState<unknown>(null)
@@ -93,6 +98,7 @@ export function GenerateReportDialog({
     setPicked([])
     setInstruction('')
     setTemplateId('')
+    setVariant('')
     setError(null); setErrorSource(null)
     setPending(false)
   }, [open, defaultTitle])
@@ -107,6 +113,36 @@ export function GenerateReportDialog({
       .catch(() => { if (!cancelled) setTemplates([]) })
     return () => { cancelled = true }
   }, [open, project])
+
+  // Business-case 19: the variants the project's compared options allow. A failed read
+  // leaves Standard as the only choice, as the template list does.
+  useEffect(() => {
+    if (!open || !project) { setVariants(null); return }
+    let cancelled = false
+    getReportVariants(project)
+      .then(v => { if (!cancelled) setVariants(v) })
+      .catch(() => { if (!cancelled) setVariants(null) })
+    return () => { cancelled = true }
+  }, [open, project])
+
+  const variantChoices: { id: ReportVariant; label: string; rule: string }[] = []
+  if (variants && !variants.stale) {
+    if (variants.rankable_npv >= 2) {
+      variantChoices.push({
+        id: 'top_npv', label: 'Top 3 by NPV',
+        rule: variants.rankable_npv <= 3
+          ? `Ranks the options by NPV, highest first. Shows all ${variants.rankable_npv} options.`
+          : 'Ranks the options by NPV, highest first. The report shows the top 3.',
+      })
+    }
+    if (variants.rankable_irr >= 2) {
+      variantChoices.push({
+        id: 'greatest_irr', label: 'Greatest IRR',
+        rule: 'Ranks the options by IRR, highest first. The report shows the option with the greatest IRR.',
+      })
+    }
+  }
+  const showVariants = variantChoices.length > 0 || (variants?.stale ?? false)
 
   function pickTemplate(id: string) {
     setTemplateId(id)
@@ -133,6 +169,7 @@ export function GenerateReportDialog({
     const ordered = choices.map(c => c.id).filter(id => picked.includes(id))
     if (ordered.length > 0) opts.sections = ordered
     if (instruction.trim()) opts.instruction = instruction.trim()
+    if (variant) opts.variant = variant
     if (templateId) opts.template_file_id = templateId
     setPending(true)
     setError(null); setErrorSource(null)
@@ -222,6 +259,32 @@ export function GenerateReportDialog({
             <option value="nl" />
           </datalist>
         </div>
+
+        {showVariants && (
+          <fieldset className="flex flex-col gap-1 min-w-0" disabled={pending} data-testid="report-variants">
+            <legend className="text-[10.5px] font-medium text-muted">Report variant</legend>
+            {variants?.stale ? (
+              <p className="text-[11px] text-muted" role="status">
+                Out of date: the inputs changed after the last option compare. Run the compare again to rank the options. Until then only the standard report is offered.
+              </p>
+            ) : (
+              <>
+                {[{ id: '' as const, label: 'Standard', rule: '' }, ...variantChoices].map(v => (
+                  <label key={v.id || 'standard'} className="inline-flex items-center gap-1.5 text-[11.5px] text-text cursor-pointer">
+                    <input type="radio" name={`${ids}-variant`} checked={variant === v.id}
+                           onChange={() => setVariant(v.id)} />
+                    {v.label}
+                  </label>
+                ))}
+                {variant && (
+                  <p className="text-[10.5px] text-muted" data-testid="report-variant-rule">
+                    {variantChoices.find(v => v.id === variant)?.rule}
+                  </p>
+                )}
+              </>
+            )}
+          </fieldset>
+        )}
 
         <fieldset className="flex flex-col gap-1 min-w-0" disabled={pending}>
           <legend className="text-[10.5px] font-medium text-muted">

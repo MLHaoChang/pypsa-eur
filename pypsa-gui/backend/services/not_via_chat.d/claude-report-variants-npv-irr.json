@@ -1,0 +1,13 @@
+{
+ "entries": [{
+  "id": "report_variants",
+  "title": "Report variants (top 3 by NPV, greatest IRR)",
+  "disposition": "unbuilt",
+  "reason": "Chat cannot ask for a ranked report variant yet; the Generate report dialog offers Top 3 by NPV and Greatest IRR once options are compared.",
+  "page": "Reports (Generate report)",
+  "panel": null,
+  "keywords": ["variant", "variants", "ranked"],
+  "routes": [["GET", "/api/projects/{name}/report-variants"]]
+ }],
+ "goals": {}
+}

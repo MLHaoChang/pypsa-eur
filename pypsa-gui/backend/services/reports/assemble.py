@@ -41,6 +41,7 @@ from models.report import (
     Field,
     Figure,
     FigureRef,
+    Paragraph,
     ReportDocument,
     Section,
     Table,
@@ -101,6 +102,7 @@ _CATEGORY_OF_SECTION = {
     "headline_results": "investment", "capacity": "investment", "prices_costs": "investment",
     "model_summary": "operation", "dispatch": "operation", "emissions": "operation",
     "load_flow": "grid_plan",
+    "option_ranking": "investment",
 }
 
 
@@ -423,8 +425,22 @@ def _charts_section(charts: list, figures: dict[str, Figure]) -> Section | None:
 # ── entry point ──────────────────────────────────────────────────────────
 
 
+def _option_ranking_section(r: Any, extra_tables: dict[str, Table]) -> Section:
+    """The "Option ranking" section of a report variant (business-case 19): the rule
+    in its caption and a rank / option / NPV / IRR table, code-written."""
+    from services.study import option_ranking as OR
+
+    extra_tables[OR.SECTION_ID] = Table(
+        table_id=OR.SECTION_ID, columns=["Rank", "Option", "NPV", "IRR"],
+        rows=OR.table_rows(r), caption=r.rule)
+    return Section(section_id=OR.SECTION_ID, heading="Option ranking", source="code",
+                   status="ok", blocks=[Paragraph(md=r.rule),
+                                        TableRef(table_id=OR.SECTION_ID)])
+
+
 def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
-                           figure_pngs: dict[str, bytes]) -> ReportDocument:
+                           figure_pngs: dict[str, bytes],
+                           option_ranking: Any = None) -> ReportDocument:
     """
     The code-only report (``mode="evidence_only"``) for ``evidence``.
 
@@ -441,6 +457,8 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
     sections: list[Section] = [_executive_summary(evidence, figure_pngs, figures)]
     if (inv := _chapter_section(evidence, C.INVESTMENT)) is not None:
         sections.append(inv)
+    if option_ranking is not None:
+        sections.append(_option_ranking_section(option_ranking, extra_tables))
     for name in REPORT_SECTIONS:
         sections.append(_eh_section(evidence, name, figure_pngs, figures, extra_tables))
     sections.extend(_adequacy_sections(evidence, extra_tables))
