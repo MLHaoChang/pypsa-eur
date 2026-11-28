@@ -1173,3 +1173,33 @@ def test_a_lock_held_by_another_process_times_out_as_report_busy(pdir, monkeypat
     with pytest.raises(store.ReportBusy):
         store.save_version(pdir, store.load_report(pdir, RID))
     assert store.load_meta(pdir, RID).latest_version == 1
+
+
+# ── 07g: a comment names the digest it was read at ──────────────────────────
+
+
+def test_a_comment_at_the_latest_digest_is_stored(pdir):
+    c = R.add_comment(pdir, RID, "x", _anchor(), base_digest=_digest(pdir))
+    assert c.status == "open" and c.base_digest == _digest(pdir)
+    assert [k.comment_id for k in R.load_comments(pdir, RID)] == [c.comment_id]
+
+
+def test_a_comment_at_an_older_digest_is_refused_and_not_stored(pdir):
+    e = _refused(lambda: R.add_comment(pdir, RID, "x", _anchor(), base_digest="0" * 64))
+    assert (e.kind, e.status) == ("revision_stale_base", 409)
+    assert R.load_comments(pdir, RID) == []
+
+
+def test_the_route_refuses_a_comment_at_an_older_digest(
+    client, api_project, project_storage_dir
+):
+    name = api_project("rev-07g-digest")
+    store.create_report(project_storage_dir(name), _doc())
+    digest = client.get(_base(name)).json()["digest"]
+    body = {"text": "t", "anchor": {"section_id": "grid", "block_index": 0}}
+    stale = client.post(_base(name), json={**body, "base_digest": "0" * 64})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["error_kind"] == "revision_stale_base"
+    assert client.get(_base(name)).json()["comments"] == []
+    ok = client.post(_base(name), json={**body, "base_digest": digest})
+    assert ok.status_code == 200, ok.text[:300]

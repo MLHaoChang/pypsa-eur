@@ -1110,6 +1110,9 @@ class CommentBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str
     anchor: dict
+    #: 07g: the digest the caller read the report at; a newer latest version
+    #: refuses the comment `revision_stale_base` (409). Omitted: no check.
+    base_digest: str | None = None
 
 
 class AddressBody(BaseModel):
@@ -1169,7 +1172,9 @@ def add_report_comment(report_id: str, body: CommentBody,
     """Store a comment on one part of the latest version: `anchor` is
     `{section_id, block_index?}` or `{section_id, table_id}`. A comment on a
     part outside the closed edit set is stored open with its `reason`. 422
-    `report_comment_anchor_invalid` when the anchor names nothing."""
+    `report_comment_anchor_invalid` when the anchor names nothing; 409
+    `revision_stale_base` when `base_digest` is given and is not the latest
+    version's digest."""
     from services.reports import revisions
 
     _latest_or_404(project, report_id)
@@ -1182,7 +1187,8 @@ def add_report_comment(report_id: str, body: CommentBody,
     anchor = _validated(revisions.Anchor, body.anchor, "anchor")
     try:
         comment = revisions.add_comment(project.directory, report_id, text, anchor,
-                                        user=getattr(user, "email", None))
+                                        user=getattr(user, "email", None),
+                                        base_digest=body.base_digest)
     except (revisions.RevisionError, store.ReportStoreError) as exc:
         raise _revision_http(exc) from exc
     return comment.model_dump(mode="json")
