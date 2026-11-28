@@ -169,3 +169,11 @@ def test_a_tie_over_the_cut_off_is_said_and_unranked_columns_carry_their_own_rea
     assert last[2] == f"— ({OR.NO_NPV_REASON})" and last[3] == "30.0 %"
     cut = OR.rank([_f("a", 1.0, 0.1), _f("b", 2.0, 0.2), _f("c", None, None)], "top_npv", 1)
     assert f"— ({OR.NO_IRR_REASON})" == OR.table_rows(cut)[-1][3]
+
+
+def test_a_ranked_row_without_an_irr_says_why():
+    figs = [_f("a", 9.0, None, OR._plain("irr_undefined")), _f("b", 5.0, 0.1), _f("c", 1.0, None)]
+    rows = OR.table_rows(OR.rank(figs, "top_npv", 3))
+    assert [r[1] for r in rows] == ["A", "B", "C"]
+    assert rows[0][3] == f"— ({OR.NO_IRR_REASON})" and rows[2][3] == f"— ({OR.NO_IRR_REASON})"
+    assert rows[1][3] == "10.0 %"

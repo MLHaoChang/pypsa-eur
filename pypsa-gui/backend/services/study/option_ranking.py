@@ -128,7 +128,8 @@ def rank(figures: list[dict], variant: str, n: int | None = None) -> Ranking:
             rank_no, prev = i + 1, f[ranked_key]
         if rank_no > limit:
             break
-        rows.append(Row(f["option_id"], f["label"], f["npv"], f["irr"], None, rank_no))
+        rows.append(Row(f["option_id"], f["label"], f["npv"], f["irr"], None, rank_no,
+                        f["irr_reason"] or NO_IRR_REASON))
     reason = NO_NPV_REASON if ranked_key == "npv" else NO_IRR_REASON
     unranked = [Row(f["option_id"], f["label"], f["npv"], f["irr"],
                     f["irr_reason"] or reason if ranked_key == "irr" else reason, None,
@@ -155,17 +156,18 @@ def _rule(variant: str, limit: int, available: int, has_unranked: bool, tied: bo
     return text
 
 
+def _cells(x: Row) -> tuple[str, str]:
+    """NPV and IRR as the compare view formats them; a missing figure is "—" with its reason."""
+    return (num(x.npv) if x.npv is not None else f"— ({NO_NPV_REASON})",
+            pct(x.irr) if x.irr is not None else f"— ({x.irr_reason or NO_IRR_REASON})")
+
+
 def table_rows(r: Ranking) -> list[list[str]]:
-    """Rows as the docx table shows them: rank, option, NPV, IRR (as the compare view formats)."""
+    """Rows as the docx table shows them: rank, option, NPV, IRR."""
     everyone = [*r.rows, *r.unranked]
     labels = [x.label for x in everyone]
 
     def name(x: Row) -> str:  # the label alone, with the id only where labels clash
         return f"{x.label} ({x.option_id})" if labels.count(x.label) > 1 else x.label
 
-    rows = [[str(x.rank), name(x), num(x.npv), pct(x.irr)] for x in r.rows]
-    rows += [["—", name(x),
-              num(x.npv) if x.npv is not None else f"— ({NO_NPV_REASON})",
-              pct(x.irr) if x.irr is not None else f"— ({x.irr_reason or NO_IRR_REASON})"]
-             for x in r.unranked]
-    return rows
+    return [[str(x.rank) if x.rank is not None else "—", name(x), *_cells(x)] for x in everyone]
