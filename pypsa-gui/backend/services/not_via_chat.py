@@ -407,8 +407,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },    {
         'id': 'report_comment_revisions',
         'title': 'Report comments and comment revisions',
-        'disposition': 'unbuilt',
-        'reason': 'Commenting on a saved report and revising it from a comment is not available from chat yet. No report screen offers it yet either; only the report comments API does.',
+        'disposition': 'out of chat',
+        'reason': ('Report comments are written and withdrawn in the report viewer on the Reports page, '
+                   'and a run drafts fixes for them from its run card. The assistant cannot read or write them.'),
         'page': 'Reports',
         'panel': None,
         'keywords': frozenset({

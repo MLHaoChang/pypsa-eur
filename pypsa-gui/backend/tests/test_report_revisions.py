@@ -1173,3 +1173,64 @@ def test_a_lock_held_by_another_process_times_out_as_report_busy(pdir, monkeypat
     with pytest.raises(store.ReportBusy):
         store.save_version(pdir, store.load_report(pdir, RID))
     assert store.load_meta(pdir, RID).latest_version == 1
+
+
+# ── 07g: a comment names the digest it was read at ──────────────────────────
+
+
+def test_a_comment_at_the_latest_digest_is_stored(pdir):
+    c = R.add_comment(pdir, RID, "x", _anchor(), base_digest=_digest(pdir))
+    assert c.status == "open" and c.base_digest == _digest(pdir)
+    assert [k.comment_id for k in R.load_comments(pdir, RID)] == [c.comment_id]
+
+
+def _report_files(pdir) -> dict[str, bytes]:
+    root = pdir / "reports" / RID
+    return {
+        str(f.relative_to(root)): f.read_bytes()
+        for f in sorted(root.rglob("*"))
+        if f.is_file()
+    }
+
+
+def test_a_comment_at_an_older_digest_is_refused_and_writes_nothing(pdir):
+    R.add_comment(pdir, RID, "first", _anchor())
+    before = _report_files(pdir)
+    assert "comments.json" in before
+    e = _refused(lambda: R.add_comment(pdir, RID, "x", _anchor(), base_digest="0" * 64))
+    assert (e.kind, e.status) == ("revision_stale_base", 409)
+    # The comments file, every version and the meta are byte-equal (GK B, 07g).
+    assert _report_files(pdir) == before
+
+
+def test_the_digest_check_is_made_under_the_report_lock(pdir, monkeypatch):
+    """A version saved between the caller's read and the lock still refuses:
+    the digest is read inside `store.report_lock`, not before it."""
+    seen = _digest(pdir)
+    real_lock = store.report_lock
+
+    def lock_then_revise(project_dir, report_id):
+        monkeypatch.setattr(store, "report_lock", real_lock)
+        doc = store.load_report(project_dir, report_id)
+        store.save_version(project_dir, doc.model_copy(update={"title": "v2"}))
+        return real_lock(project_dir, report_id)
+
+    monkeypatch.setattr(store, "report_lock", lock_then_revise)
+    e = _refused(lambda: R.add_comment(pdir, RID, "x", _anchor(), base_digest=seen))
+    assert e.kind == "revision_stale_base"
+    assert R.load_comments(pdir, RID) == []
+
+
+def test_the_route_refuses_a_comment_at_an_older_digest(
+    client, api_project, project_storage_dir
+):
+    name = api_project("rev-07g-digest")
+    store.create_report(project_storage_dir(name), _doc())
+    digest = client.get(_base(name)).json()["digest"]
+    body = {"text": "t", "anchor": {"section_id": "grid", "block_index": 0}}
+    stale = client.post(_base(name), json={**body, "base_digest": "0" * 64})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["error_kind"] == "revision_stale_base"
+    assert client.get(_base(name)).json()["comments"] == []
+    ok = client.post(_base(name), json={**body, "base_digest": digest})
+    assert ok.status_code == 200, ok.text[:300]

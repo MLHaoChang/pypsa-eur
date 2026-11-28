@@ -3,7 +3,7 @@
 
 # 07g — Report comments in the report viewer: create and withdraw
 
-Status: ready-for-agent; audit 2026-11-28: unblocked (07d PR B merged, #1746); left: the whole UI (create and withdraw in the report viewer), UX placement first
+Status: done (PR on branch claude/sh-07g-report-comment-ui; UX 34 plan GO WITH CHANGES and GK B plan GO, 2026-11-28)
 Type: task
 Blocked by: none (07d PR B merged as #1746 on 2026-11-20; PR A is #1649)
 Gated: yes (UX; GK B for any route change)
@@ -21,11 +21,11 @@ Split from: [07d](07d-report-revision-drafts.md), PR B scope (coordinator, 2026-
 
 ## Acceptance criteria
 
-- [ ] A comment is created from the report viewer against the latest version's digest, through 07c's `POST …/comments`.
-- [ ] An open comment can be withdrawn; an addressed or withdrawn one cannot.
-- [ ] Refusals (`report_comment_closed`, `revision_stale_base`, the viewer role's 403) are shown in words.
-- [ ] UX placement agreed before building (the reports page is a workflow surface).
-- [ ] The chat disposition of `GET /api/projects/{name}/reports/{report_id}/comments` is settled: a typed read tool, or a limitation. 07d PR B holds it on this issue (`held-by-spec`).
+- [x] A comment is created from the report viewer against the latest version's digest, through 07c's `POST …/comments`.
+- [x] An open comment can be withdrawn; an addressed or withdrawn one cannot.
+- [x] Refusals (`report_comment_closed`, `revision_stale_base`, the viewer role's 403) are shown in words.
+- [x] UX placement agreed before building (the reports page is a workflow surface).
+- [x] The chat disposition of `GET /api/projects/{name}/reports/{report_id}/comments` is settled: a typed read tool, or a limitation. 07d PR B holds it on this issue (`held-by-spec`).
 
 ## Likely files
 
@@ -34,3 +34,9 @@ Split from: [07d](07d-report-revision-drafts.md), PR B scope (coordinator, 2026-
 ## Audit (2026-11-28)
 
 - 2026-11-28 audit: 07d is `done (#1746)` and `components/runMonitor/RevisionDrafts.tsx` is on master, so the blocker is gone. `api/reports.ts` has `listReportComments` only; no create or withdraw call and no comment screen in `pages/reports/`. Left: everything in the acceptance list, including the chat disposition of the comments read (still `held-by-spec` on this issue). Order: UX placement (the reports page is a workflow surface), then the build. Model tier unchanged: opus.
+
+## Build (2026-11-28)
+
+- UI: `pages/reports/SectionComments.tsx` (one comments list per section under its header, "Comment…" in the section header on the latest version only, inline-confirmed Withdraw on the signed-in user's own open comments), words in `pages/reports/commentWords.ts`, wired from `ReportViewer.tsx` and `SectionCard.tsx`.
+- Backend: `POST …/comments` takes an optional `base_digest`; a newer latest version refuses it `revision_stale_base` (409) under the report lock, and the UI always sends it.
+- Chat disposition: a limitation. `report_comment_revisions` in `services/not_via_chat.py` is now `out of chat`, pointing to the report viewer; no typed read tool.

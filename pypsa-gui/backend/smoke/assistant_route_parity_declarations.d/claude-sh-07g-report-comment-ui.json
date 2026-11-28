@@ -1,0 +1,22 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/reports/{report_id}/comments",
+   "reason": "ui-pointer",
+   "decision": "SH07G-POINTER-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/reports/{report_id}/comments",
+   "reason": "ui-pointer",
+   "decision": "SH07G-POINTER-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw",
+   "reason": "ui-pointer",
+   "decision": "SH07G-POINTER-1"
+  }
+ ]
+}

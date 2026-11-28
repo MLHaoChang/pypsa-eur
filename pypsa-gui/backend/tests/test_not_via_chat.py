@@ -75,7 +75,7 @@ def test_the_issue_rows_are_declared():
         'model_import': ('unbuilt', None),  # project-io 04; chat in issue 05 or later
         'parameter_catalogue': ('unbuilt', None),  # expert-catalogue 01a; the guide pages (find_parameter took the catalogue, 05)
         'import_range_flags': ('unbuilt', None),  # expert-catalogue 01a-3b (not_via_chat.d/)
-        'report_comment_revisions': ('unbuilt', None),
+        'report_comment_revisions': ('out of chat', None),  # 07g: the report viewer writes them
         'report_revision_drafts': ('out of chat', None),
         'report_chart_snapshots': ('manual', 'results'),
         'energization_timeline': ('unbuilt', None),  # DC review 06 (not_via_chat.d/)

@@ -32,6 +32,9 @@ const api = vi.hoisted(() => ({
   getReportCapabilities: vi.fn(),
   getVersionDiff: vi.fn(),
   uploadRoundTrip: vi.fn(),
+  // 07g
+  listReportComments: vi.fn(),
+  addReportComment: vi.fn(),
 }))
 
 vi.mock('../../api/reports', async () => {
@@ -132,6 +135,8 @@ export const FIXTURE: ReportDocument = {
   },
 }
 
+const COMMENTS_EMPTY = { report_id: REPORT_ID, latest_version: FIXTURE.version, digest: 'd1', comments: [] }
+
 function renderViewer(meta: ReportMeta = META, extra: { currentEvidenceHash?: string | null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const onBack = vi.fn()
@@ -198,6 +203,8 @@ const toastText = (arg: unknown): string =>
 
 beforeEach(() => {
   api.getReport.mockReset().mockResolvedValue(FIXTURE)
+  api.listReportComments.mockReset().mockResolvedValue(COMMENTS_EMPTY)
+  api.addReportComment.mockReset()
   api.exportReport.mockReset()
   api.getGenerateStatus.mockReset().mockResolvedValue(null)
   api.regenerateSection.mockReset().mockResolvedValue({ status: 'running', report_id: REPORT_ID, version: 1 })
@@ -667,5 +674,58 @@ describe('ReportViewer — round trip, diff and PDF (WP14)', () => {
     expect(within(sections[0]).getByTestId('section-edited').textContent).toMatch(/edited by you/i)
     await user.click(within(within(sections[0]).getByTestId('section-pending')).getByRole('button', { name: /regenerate with this/i }))
     await waitFor(() => expect(api.regenerateSection).toHaveBeenCalledWith('Demo', REPORT_ID, 'summary', {}))
+  })
+})
+
+describe('ReportViewer — report comments (07g)', () => {
+  it('offers Comment… on sections with an editable part, on the latest version only', async () => {
+    renderViewer()
+    const sections = await screen.findAllByTestId('report-section')
+    const byId = (id: string) => sections.find(s => s.getAttribute('data-section-id') === id)!
+    await waitFor(() => expect(within(byId('summary')).getByTestId('section-comment')).toBeTruthy())
+    // Callouts and a field only: nothing a revision can edit, so no button.
+    expect(within(byId('gates')).queryByTestId('section-comment')).toBeNull()
+  })
+
+  it('posts against the digest it read, and on a stale base keeps the text and reloads', async () => {
+    const { ReportsError } = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
+    api.addReportComment.mockRejectedValueOnce(new ReportsError(
+      { error_kind: 'revision_stale_base', message: 'changed' }, 409))
+    const user = userEvent.setup()
+    renderViewer()
+    await user.click((await screen.findAllByTestId('section-comment'))[0])
+    await user.type(screen.getByTestId('comment-text'), 'Lead with the cost.')
+    await user.click(screen.getByTestId('comment-submit'))
+    await waitFor(() => expect(api.addReportComment).toHaveBeenCalledWith(
+      'Demo', REPORT_ID, 'Lead with the cost.', expect.objectContaining({ section_id: expect.any(String) }), 'd1'))
+    expect((await screen.findByTestId('comment-refusal')).textContent).toMatch(/changed after you opened it/)
+    // The reload brings a real new version: the comments read again under a new key.
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    api.getReport.mockResolvedValue({ ...FIXTURE, version: 2 })
+    api.listReportComments.mockImplementation(() => gate.then(() => ({ ...COMMENTS_EMPTY, latest_version: 2, digest: 'd2' })))
+    await user.click(screen.getByTestId('comment-reload'))
+    await waitFor(() => expect(screen.getByText('v2')).toBeTruthy())
+    release()
+    const box = await screen.findByTestId('comment-text') as HTMLTextAreaElement
+    expect(box.value).toBe('Lead with the cost.')
+    api.addReportComment.mockResolvedValueOnce({})
+    await user.click(screen.getByTestId('comment-submit'))
+    await waitFor(() => expect(api.addReportComment).toHaveBeenLastCalledWith(
+      'Demo', REPORT_ID, 'Lead with the cost.', expect.anything(), 'd2'))
+  })
+
+  it('on an older version says comments go on the latest, and the line switches to it', async () => {
+    const user = userEvent.setup()
+    api.getReport.mockImplementation((_p: string, _id: string, v?: number) =>
+      Promise.resolve({ ...FIXTURE, version: v ?? 3 }))
+    api.listReportComments.mockResolvedValue({ ...COMMENTS_EMPTY, latest_version: 3 })
+    renderViewer({ ...META, latest_version: 3 })
+    await user.selectOptions(await screen.findByLabelText('Version'), '2')
+    const line = await screen.findByTestId('comments-latest-only')
+    expect(line.textContent).toBe('Comments go on the latest version (v3) ›')
+    await waitFor(() => expect(screen.queryAllByTestId('section-comment')).toHaveLength(0))
+    await user.click(line)
+    await waitFor(() => expect(screen.queryByTestId('comments-latest-only')).toBeNull())
   })
 })

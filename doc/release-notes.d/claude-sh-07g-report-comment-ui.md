@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The report viewer now lets you comment on a paragraph, bullet list or table of the latest version, see each comment's status (open, addressed, withdrawn) and why an open one cannot be revised, and withdraw your own open comments. A comment made after the report changed is refused in words and keeps your text; report comments stay out of chat.

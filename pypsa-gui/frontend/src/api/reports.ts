@@ -917,6 +917,10 @@ export interface ReportComment {
   reason?: string | null
   reasons?: string[]
   created_at: string
+  /** The signed-in author's email; null for a comment made without sign-in. */
+  created_by?: string | null
+  /** Set once addressed: the version the revision saved. */
+  revision?: { version: number; digest: string } | null
 }
 
 export interface ReportComments {
@@ -954,6 +958,24 @@ const drafts = (projectName: string, reportId: string) =>
 /** `GET …/{id}/comments`: the report's comments, oldest first. */
 export async function listReportComments(projectName: string, reportId: string): Promise<ReportComments> {
   return _json<ReportComments>(await fetch(`${drafts(projectName, reportId)}/comments`))
+}
+
+/** `POST …/comments`: comment on one part of the latest version. `baseDigest`
+ *  is the digest `listReportComments` returned; a newer version refuses it
+ *  `revision_stale_base` (07g). */
+export async function addReportComment(
+  projectName: string, reportId: string, text: string, anchor: CommentAnchor, baseDigest: string,
+): Promise<ReportComment> {
+  return _json(await _postJson(`${drafts(projectName, reportId)}/comments`,
+    { text, anchor, base_digest: baseDigest }))
+}
+
+/** `POST …/comments/{comment_id}/withdraw`: withdraw an open comment. */
+export async function withdrawReportComment(
+  projectName: string, reportId: string, commentId: string,
+): Promise<ReportComment> {
+  return _json(await _postJson(
+    `${drafts(projectName, reportId)}/comments/${encodeURIComponent(commentId)}/withdraw`, {}))
 }
 
 /** `POST …/comments/{comment_id}/drafts`: ask the named run to draft a fix. */

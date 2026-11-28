@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { authApi, type AuthUser } from '../api/auth'
@@ -9,19 +9,7 @@ import { loginWithPassword } from './requests'
 import { USER_SCOPED_ROOTS } from '../utils/queryKeys'
 import { clearImprovePrefill } from '../pages/hubDesign/improvePrefill'
 
-type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
-
-interface AuthContextValue {
-  user: AuthUser | null
-  status: AuthStatus
-  isAuthenticated: boolean
-  isAdmin: boolean
-  login: (email: string, password: string) => Promise<AuthUser>
-  logout: () => Promise<void>
-  refresh: () => Promise<AuthUser | null>
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null)
+import { AuthContext, type AuthContextValue, type AuthStatus } from './authContext'
 
 function isUnauthorized(error: unknown): boolean {
   return axios.isAxiosError(error) && error.response?.status === 401

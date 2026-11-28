@@ -1,12 +1,6 @@
 {
  "limitations": [
   {
-   "method": "GET",
-   "path": "/api/projects/{name}/reports/{report_id}/comments",
-   "reason": "held-by-spec",
-   "issue": ".scratch/study-harness/issues/07g-report-comment-ui.md"
-  },
-  {
    "method": "POST",
    "path": "/api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts",
    "reason": "ui-pointer",

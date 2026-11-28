@@ -705,15 +705,32 @@ def _open_or_409(comment: Comment) -> None:
 
 
 def add_comment(
-    project_dir, report_id: str, text: str, anchor: Anchor, *, user: str | None = None
+    project_dir,
+    report_id: str,
+    text: str,
+    anchor: Anchor,
+    *,
+    user: str | None = None,
+    base_digest: str | None = None,
 ) -> Comment:
     """Store a new open comment on the latest version. An anchor that names
     no section, block or table of it is refused `report_comment_anchor_invalid`
     and nothing is stored; one outside the closed set is stored open with
-    its reason."""
+    its reason. A `base_digest` (the digest the caller read the report at)
+    that is not the latest version's digest (`_latest`, the same digest
+    `address` compares its base against) is refused `revision_stale_base`
+    (409) and nothing is stored; the check and the write share the one
+    report lock (07g)."""
     with store.report_lock(project_dir, report_id):
         comments = load_comments(project_dir, report_id)
         doc, digest = _latest(project_dir, report_id)
+        if base_digest is not None and base_digest != digest:
+            raise RevisionError(
+                "revision_stale_base",
+                409,
+                "The report changed after you opened it: your comment was not saved. "
+                "Reload the report and post it again.",
+            )
         found = _anchored(doc, anchor)
         if found is None:
             raise RevisionError(

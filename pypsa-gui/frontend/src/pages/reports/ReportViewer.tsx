@@ -52,7 +52,7 @@
 // server); a PDF export downloads but is not previewed (docx-preview reads
 // Word files only).
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, Eye, FileDown, FileText, GitCompareArrows,
 } from 'lucide-react'
@@ -62,6 +62,7 @@ import {
   getReport,
   getReportCapabilities,
   getReportTemplate,
+  listReportComments,
   reportErrorMessage,
   reportJobErrorMessage,
   roundTripErrorMessage,
@@ -71,6 +72,7 @@ import {
   type RoundTripResponse,
 } from '../../api/reports'
 import { getUploadBlobUrl, type UploadMeta } from '../../api/uploads'
+import { useAuthUserEmail } from '../../auth/authContext'
 import { Btn, PageSection, Tag } from '../../components/PageKit'
 import { DocxPreview } from './DocxPreview'
 import { MappingPlanEditor } from './MappingPlanEditor'
@@ -86,6 +88,9 @@ import { REPORT_DOC_PREFIX, REPORT_TEMPLATE_KEY, REPORTS_LIST_KEY, useReportJob 
 export const REPORT_CAPABILITIES_KEY = (project: string) => ['reports', 'capabilities', project] as const
 export const PDF_UNAVAILABLE_HINT = 'PDF export needs LibreOffice on the server'
 
+/** 07g: a report's comments, read again whenever another version is the latest shown. */
+export const REPORT_COMMENTS_KEY = (project: string, reportId: string, latestShown: number | null) =>
+  ['reports', 'comments', project, reportId, latestShown] as const
 export const REPORT_DOC_KEY = (project: string, reportId: string, version: number | null) =>
   ['reports', 'doc', project, reportId, version] as const
 
@@ -162,6 +167,29 @@ export function ReportViewer({
   })
 
   const shownVersion = doc.data?.version ?? version ?? meta.latest_version
+
+  // 07g: report comments. Read with the doc's own version in the key, so a new
+  // latest version (a job, a merge, a revision) reads them, and their digest, again.
+  const myEmail = useAuthUserEmail()
+  const latestShown = version === null ? doc.data?.version ?? null : null
+  const comments = useQuery({
+    queryKey: REPORT_COMMENTS_KEY(project, meta.report_id, latestShown),
+    queryFn: () => listReportComments(project, meta.report_id),
+    enabled: !!doc.data,
+    retry: false,
+    // Keep the last read while a new version's comments load, so a section's
+    // comments stay mounted and a typed draft survives a Reload (UX 34, change 2).
+    placeholderData: keepPreviousData,
+  })
+  const canComment = version === null && !!doc.data && comments.data?.latest_version === doc.data.version
+  function commentsChanged(message: string) {
+    void comments.refetch()
+    toast.success(message)
+  }
+  function reloadForComments() {
+    void qc.invalidateQueries({ queryKey: ['reports', 'doc', project, meta.report_id] })
+    void qc.invalidateQueries({ queryKey: ['reports', 'comments', project, meta.report_id] })
+  }
 
   const sectionTitles = doc.data
     ? Object.fromEntries(doc.data.sections.map(s => [s.section_id, s.heading]))
@@ -435,6 +463,19 @@ export function ReportViewer({
         />
       )}
 
+      {version !== null && version !== meta.latest_version && (
+        <p className="text-[11px] text-muted">
+          <button
+            type="button"
+            className="underline text-text hover:text-accent"
+            onClick={() => setVersion(null)}
+            data-testid="comments-latest-only"
+          >
+            Comments go on the latest version (v{meta.latest_version}) ›
+          </button>
+        </p>
+      )}
+
       {doc.data && doc.data.sections.map(section => (
         <SectionCard
           key={section.section_id}
@@ -443,6 +484,16 @@ export function ReportViewer({
           project={project}
           onRegenerate={regenerate}
           regenerateDisabled={job.isRunning || job.isStarting}
+          commenting={comments.data ? {
+            comments: comments.data.comments.filter(c => c.anchor.section_id === section.section_id),
+            project,
+            reportId: meta.report_id,
+            digest: canComment ? comments.data.digest : null,
+            myEmail,
+            canComment,
+            onChanged: commentsChanged,
+            onReload: reloadForComments,
+          } : undefined}
         />
       ))}
     </div>
