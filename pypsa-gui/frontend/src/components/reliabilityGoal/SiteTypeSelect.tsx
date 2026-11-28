@@ -8,11 +8,15 @@ import { useGuide } from '../GuidedTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import { Skeleton } from '../Skeleton'
 
-export const SITE_TYPES: { id: EhArchetype; label: string }[] = [
-  { id: 'strong_grid', label: 'Strong — import whenever needed' },
-  { id: 'weak_flexible', label: 'Weak or limited' },
-  { id: 'off_grid', label: 'None — the site runs as an island' },
+export const SITE_TYPES: { id: EhArchetype; label: string; short: string }[] = [
+  { id: 'strong_grid', label: 'Strong: import whenever needed', short: 'strong' },
+  { id: 'weak_flexible', label: 'Weak or limited', short: 'weak or limited' },
+  { id: 'off_grid', label: 'None: the site runs as an island', short: 'none, an island' },
 ]
+
+/** The short word for a sentence that already says "grid connection". */
+export const siteTypeShort = (a: EhArchetype): string =>
+  SITE_TYPES.find(t => t.id === a)?.short ?? a
 
 export const siteTypeLabel = (a: EhArchetype): string =>
   SITE_TYPES.find(t => t.id === a)?.label ?? a

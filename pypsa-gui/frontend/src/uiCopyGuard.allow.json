@@ -1,47 +1,5 @@
 [
   {
-    "file": "layout/PropertiesPanel.tsx",
-    "text": "MC",
-    "surface": "Properties panel, Generator card meta line (Expert; Guided field drawer reuses the panel)",
-    "reason": "held file (PropertiesPanel.tsx is changed by open PRs #1787 #1786 #1778 #1773 #1772 #1626); MC = marginal cost",
-    "fix": ".scratch/properties-blank-form/issues/01-edit-form-opens-blank.md"
-  },
-  {
-    "file": "layout/PropertiesPanel.tsx",
-    "text": "p_set",
-    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
-    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
-    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
-  },
-  {
-    "file": "layout/PropertiesPanel.tsx",
-    "text": "p_nom",
-    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
-    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
-    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
-  },
-  {
-    "file": "layout/PropertiesPanel.tsx",
-    "text": "e_nom",
-    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
-    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
-    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
-  },
-  {
-    "file": "layout/PropertiesPanel.tsx",
-    "text": "s_nom",
-    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
-    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
-    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
-  },
-  {
-    "file": "layout/PropertiesPanel.tsx",
-    "text": "v_nom",
-    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
-    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
-    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
-  },
-  {
     "file": "pages/SolverSettings.tsx",
     "text": "p_nom",
     "surface": "Solver settings panel (Expert)",
@@ -101,49 +59,49 @@
     "file": "pages/hubDesign/delegate.ts",
     "text": "grid_import",
     "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user\u2019s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
     "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
   },
   {
     "file": "pages/hubDesign/delegate.ts",
     "text": "outage_rate_value",
     "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user\u2019s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
     "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
   },
   {
     "file": "pages/hubDesign/delegate.ts",
     "text": "mttr_hours",
     "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user\u2019s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
     "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
   },
   {
     "file": "pages/hubDesign/delegate.ts",
     "text": "eh_role",
     "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user\u2019s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
     "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
   },
   {
     "file": "pages/hubDesign/delegate.ts",
     "text": "eh_poc",
     "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user\u2019s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
     "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
   },
   {
     "file": "pages/hubDesign/delegate.ts",
     "text": "eh_critical",
     "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user\u2019s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
     "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
   },
   {
     "file": "pages/hubDesign/delegate.ts",
     "text": "eh_sk_mva",
     "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
-    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user\u2019s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
     "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
   },
   {
@@ -311,49 +269,49 @@
     "file": "utils/decisionVocabulary.ts",
     "text": "p_nom",
     "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
-    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue\u2019s plain names with the word maps.",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   },
   {
     "file": "utils/decisionVocabulary.ts",
     "text": "max_hours",
     "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
-    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue\u2019s plain names with the word maps.",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   },
   {
     "file": "utils/decisionVocabulary.ts",
     "text": "efficiency_store",
     "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
-    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue\u2019s plain names with the word maps.",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   },
   {
     "file": "utils/decisionVocabulary.ts",
     "text": "efficiency_dispatch",
     "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
-    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue\u2019s plain names with the word maps.",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   },
   {
     "file": "utils/decisionVocabulary.ts",
     "text": "grid_import",
     "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
-    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue\u2019s plain names with the word maps.",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   },
   {
     "file": "utils/decisionVocabulary.ts",
     "text": "p_set",
     "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
-    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue\u2019s plain names with the word maps.",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   },
   {
     "file": "utils/decisionVocabulary.ts",
     "text": "eh_role",
     "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
-    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue\u2019s plain names with the word maps.",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
     "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
   }
 ]

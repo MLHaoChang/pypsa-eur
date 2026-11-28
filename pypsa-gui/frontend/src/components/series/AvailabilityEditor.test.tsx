@@ -147,7 +147,7 @@ describe('AvailabilityEditor', () => {
     api.fromCurrent.mockResolvedValue({ ...PENDING, job_id: 'job-cur', source: 'current',
       profile_annual_basis: 'window_mean' })
     renderEditor('guided')
-    expect((await screen.findByTestId('current-series')).textContent).toContain('Current availability:measured, 168 h')
+    expect((await screen.findByTestId('current-series')).textContent).toContain('Current availability:measured · 168 h')
     await userEvent.click(screen.getByRole('button', { name: /Refine this series/ }))
     await waitFor(() => expect(api.fromCurrent).toHaveBeenCalledWith('Site A', 'generators', 'p_max_pu', 'gt1'))
     // Advanced opens with the refinement ops; a window source has no shift or smoothing.

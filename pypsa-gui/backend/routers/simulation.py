@@ -1457,6 +1457,27 @@ def preflight_validate(under_lock=None, *, validate: bool = True):
 
 # ── Run / Abort / Status ──────────────────────────────────────────────────────
 
+def run_objective_basis(n) -> dict:
+    """What `_compute_run_objective`'s figure is, for the words beside it (template-e2e 18).
+
+    Read from the solve's own stamps (`services.solver.assumptions`), never today's config:
+    ``"system_cost"`` when it ran myopic or rolling (the statistics-based horizon cost,
+    undiscounted, as the Summary's total), ``"lp_objective"`` for a full-horizon solve, and
+    ``"unknown"`` for a network solved before the stamp. ``objective_discounted_to`` is the
+    year an LP objective is discounted to under the auto period discount, else None.
+    """
+    from services.solver.assumptions import UNKNOWN, solve_discount, solve_strategy
+
+    strategy = solve_strategy(n)
+    if strategy in ("myopic", "rolling"):
+        return {"objective_basis": "system_cost", "objective_discounted_to": None}
+    if strategy is None:
+        return {"objective_basis": UNKNOWN, "objective_discounted_to": None}
+    disc = solve_discount(n)
+    return {"objective_basis": "lp_objective",
+            "objective_discounted_to": disc["ref_year"] if isinstance(disc, dict) else None}
+
+
 def _compute_run_objective(n, cfg=None) -> float | None:
     """
     Total system cost reported in the status bar = n.objective + n.objective_constant.
@@ -2016,6 +2037,7 @@ def get_status():
         stamp = (getattr(network, "meta", None) or {}).get("assistant_solve_at")
         solved_at = stamp if isinstance(stamp, str) else None
     objective = s["objective"]
+    basis_network = network
     if dispatch == "none":
         # A finished Guided study's own solve is the latest run (template-e2e 30).
         from services import study_solve
@@ -2023,11 +2045,17 @@ def get_status():
         held = study_solve.fallback()
         if held is not None:
             dispatch, objective = "fresh", held["objective"]
+            basis_network = held["network"]
+    basis = (run_objective_basis(basis_network) if objective is not None and basis_network is not None
+             else {"objective_basis": None, "objective_discounted_to": None})
     return {
         "running": s["status"] == "running",
         "status": s["status"],
         "condition": s["condition"],
         "objective": objective,
+        # What the objective is (template-e2e 18): the LP objective, discounted to a year or
+        # not, or the horizon system cost (myopic, rolling); None without an objective.
+        **basis,
         "solve_time": s["solve_time"],
         # Actionable failure card for the last finished solve (None on
         # success/abort or before any run). Lets a late poll / reload surface
