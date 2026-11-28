@@ -51,7 +51,6 @@ wrapping ``services/campus_grid_code_service.py``:
 The upload is read under one ``UploadBudget`` of the PDF cap; parsing it and
 the extraction (one API call, up to minutes) run off the event loop.
 """
-
 from __future__ import annotations
 
 import uuid
@@ -118,8 +117,7 @@ class IslandConfigBody(BaseModel):
 
 class IslandStudyBody(BaseModel):
     scenarios: list[Literal["ups_bridged", "seamless", "planned"]] | None = Field(
-        None, min_length=1, max_length=3
-    )
+        None, min_length=1, max_length=3)
 
 
 class RunSettings(BaseModel):
@@ -180,9 +178,7 @@ def _check_lock(proj: AuthorizedProject, db: DBSession, user: User | None) -> No
 
 
 @router.get("/{name}")
-def get_state(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_state(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The campus file, the grid-code profiles, the last settings and results."""
     return ce.get_state(_row(proj, db))
 
@@ -224,13 +220,10 @@ async def run(
     runs for minutes: follow it in ``GET /{name}`` (``run_job``, with its
     stage) or the solve queue, and abort it there."""
     _check_lock(proj, db, user)
-    return await run_in_threadpool(
-        ce.enqueue_run, _row(proj, db), body.model_dump(), user
-    )
+    return await run_in_threadpool(ce.enqueue_run, _row(proj, db), body.model_dump(), user)
 
 
 # ── the joint optimisation (MILP) as a background job (plan C12) ────────────
-
 
 @router.post("/{name}/milp", status_code=202)
 async def start_milp(
@@ -246,9 +239,7 @@ async def start_milp(
 
 
 @router.get("/{name}/milp")
-def milp_status(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def milp_status(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The job's record: state, iteration, best cost against the least-cost one."""
     return ce.milp_job_status(_row(proj, db))
 
@@ -266,13 +257,9 @@ def cancel_milp(
 
 # ── the grid-readiness scorecard (DC grid readiness 02) ─────────────────────
 
-
 @router.get("/{name}/grid-readiness")
-async def get_grid_readiness(
-    profile: str | None = None,
-    proj: AuthorizedProject = ProjectAccessDep,
-    db: DBSession = Depends(get_db),
-):
+async def get_grid_readiness(profile: str | None = None, proj: AuthorizedProject = ProjectAccessDep,
+                             db: DBSession = Depends(get_db)):
     """The project's grid-readiness scorecard against grid-code ``profile``
     (default: the campus study's last-run profile, else ``eu_rfg_dcc_ce``):
     rows ``{id, requirement, limit, unit, source, project_value, verdict,
@@ -296,9 +283,7 @@ class LimitBody(BaseModel):
 
 
 def _limit_error(exc: Exception) -> HTTPException:
-    return HTTPException(
-        status_code=422, detail={"error_kind": exc.kind, "message": exc.message}
-    )
+    return HTTPException(status_code=422, detail={"error_kind": exc.kind, "message": exc.message})
 
 
 @router.put("/{name}/grid-readiness/limits/{item}")
@@ -316,14 +301,9 @@ def put_grid_readiness_limit(
 
     _check_lock(proj, db, user)
     try:
-        return grid_limits.set_limit(
-            project_registry.project_dir(_row(proj, db)),
-            item,
-            value=body.value,
-            source=body.source,
-            note=body.note,
-            set_by=getattr(user, "email", None),
-        )
+        return grid_limits.set_limit(project_registry.project_dir(_row(proj, db)), item,
+                                     value=body.value, source=body.source, note=body.note,
+                                     set_by=getattr(user, "email", None))
     except grid_limits.LimitError as exc:
         raise _limit_error(exc) from exc
 
@@ -341,16 +321,13 @@ def delete_grid_readiness_limit(
 
     _check_lock(proj, db, user)
     try:
-        cleared = grid_limits.clear_limit(
-            project_registry.project_dir(_row(proj, db)), item
-        )
+        cleared = grid_limits.clear_limit(project_registry.project_dir(_row(proj, db)), item)
     except grid_limits.LimitError as exc:
         raise _limit_error(exc) from exc
     return {"item": item, "cleared": cleared}
 
 
 # ── the data-centre backup (DC grid readiness 03) ───────────────────────────
-
 
 class DcBackupAssessBody(BaseModel):
     model_config = {"extra": "forbid"}
@@ -360,14 +337,8 @@ class DcBackupAssessBody(BaseModel):
 
 
 def _dc_backup_error(exc: Exception) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={
-            "error_kind": "dc_backup_invalid",
-            "message": str(exc),
-            "field": exc.field,
-        },
-    )
+    return HTTPException(status_code=422, detail={
+        "error_kind": "dc_backup_invalid", "message": str(exc), "field": exc.field})
 
 
 def _eh_templates():
@@ -375,9 +346,7 @@ def _eh_templates():
 
     tpl = _eh_templates_module()
     if tpl is None:
-        raise HTTPException(
-            status_code=503, detail="the Energy Hub templates are not shipped"
-        )
+        raise HTTPException(status_code=503, detail="the Energy Hub templates are not shipped")
     return tpl
 
 
@@ -398,18 +367,15 @@ def save_dc_backup(
 
     _check_lock(proj, db, user)
     try:
-        return dc_backup.save_backup(
-            project_registry.project_dir(_row(proj, db)), _eh_templates(), body
-        )
+        return dc_backup.save_backup(project_registry.project_dir(_row(proj, db)),
+                                     _eh_templates(), body)
     except dc_backup.DcBackupError as exc:
         raise _dc_backup_error(exc) from exc
     except dc_backup.DcBackupBusy as exc:
         # Retryable: another marker write or an undo holds the lock
         # (UM10-UNDO-1). Nothing was stored.
-        raise HTTPException(
-            status_code=409,
-            detail={"error_kind": "dc_backup_busy", "message": str(exc)},
-        ) from exc
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "dc_backup_busy", "message": str(exc)}) from exc
 
 
 @router.put("/{name}/dc-load")
@@ -512,9 +478,7 @@ async def assess_dc_backup(
     project_dir = project_registry.project_dir(_row(proj, db))
     tpl = _eh_templates()
     try:
-        return await run_in_threadpool(
-            dc_backup.assess_project, project_dir, tpl, body.mode
-        )
+        return await run_in_threadpool(dc_backup.assess_project, project_dir, tpl, body.mode)
     except dc_backup.DcBackupError as exc:
         raise _dc_backup_error(exc) from exc
 
@@ -545,52 +509,33 @@ async def compare_dc_architecture(
     project_dir = project_registry.project_dir(_row(proj, db))
     tpl = _eh_templates()
     try:
-        return await run_in_threadpool(
-            dc_architecture.compare_project,
-            project_dir,
-            tpl,
-            energy_price_per_mwh=body.energy_price_per_mwh,
-        )
+        return await run_in_threadpool(dc_architecture.compare_project, project_dir, tpl,
+                                       energy_price_per_mwh=body.energy_price_per_mwh)
     except dc_architecture.DcArchitectureError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error_kind": exc.kind, "message": str(exc), "field": exc.field},
-        ) from exc
+        raise HTTPException(status_code=422, detail={
+            "error_kind": exc.kind, "message": str(exc), "field": exc.field}) from exc
 
 
 # ── the PSS/E hand-off bundles of the latest run (grid-compliance 23) ───────
 
-
 @router.get("/{name}/psse")
-def list_psse_bundles(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def list_psse_bundles(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The latest campus run's PSS/E bundles, and whether the run is stale."""
     return ce.psse_bundles(_row(proj, db))
 
 
 @router.get("/{name}/psse/{bundle}/download")
-def download_psse_bundle(
-    bundle: str,
-    proj: AuthorizedProject = ProjectAccessDep,
-    db: DBSession = Depends(get_db),
-):
+def download_psse_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """One bundle as a zip. The name must be in the listing, so no path
     assembled from client input is opened; a bundle of a stale run is served
     with ``X-Run-Stale: true``."""
     data, stale = ce.psse_bundle_zip(_row(proj, db), bundle)
-    return Response(
-        data,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": content_disposition(f"{bundle}.zip"),
-            "X-Run-Stale": "true" if stale else "false",
-        },
-    )
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(f"{bundle}.zip"),
+                             "X-Run-Stale": "true" if stale else "false"})
 
 
 # ── the pack read-back judgment of the latest run (grid-compliance 22) ──────
-
 
 @router.post("/{name}/psse/{bundle}/emt/results")
 async def upload_pack_results(
@@ -605,13 +550,9 @@ async def upload_pack_results(
     judged against the run (GC-07 read-back). All files share one size cap."""
     _check_lock(proj, db, user)
     if len(files) > campus_judgment.MAX_RESULT_FILES:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "error_kind": "campus_results_too_many",
-                "message": f"at most {campus_judgment.MAX_RESULT_FILES} result files per upload",
-            },
-        )
+        raise HTTPException(status_code=413, detail={
+            "error_kind": "campus_results_too_many",
+            "message": f"at most {campus_judgment.MAX_RESULT_FILES} result files per upload"})
     got, used = [], 0
     for f in files:  # each file under its own cap and all of them under the total, refused while reading
         per_file = campus_judgment.MAX_RESULT_FILE_BYTES
@@ -622,95 +563,63 @@ async def upload_pack_results(
             if exc.status_code != 413:
                 raise
             if per_file <= left:
-                raise HTTPException(
-                    status_code=413,
-                    detail={
-                        "error_kind": "campus_result_too_large",
-                        "message": f"{f.filename} exceeds {per_file // (1024 * 1024)} MB",
-                    },
-                ) from exc
-            raise HTTPException(
-                status_code=413,
-                detail={
-                    "error_kind": "campus_results_too_large",
-                    "message": f"the result files exceed {campus_judgment.MAX_RESULT_BYTES // (1024 * 1024)} MB together",
-                },
-            ) from exc
+                raise HTTPException(status_code=413, detail={
+                    "error_kind": "campus_result_too_large",
+                    "message": f"{f.filename} exceeds {per_file // (1024 * 1024)} MB"}) from exc
+            raise HTTPException(status_code=413, detail={
+                "error_kind": "campus_results_too_large",
+                "message": f"the result files exceed {campus_judgment.MAX_RESULT_BYTES // (1024 * 1024)} MB together",
+            }) from exc
         used += len(data)
         got.append((f.filename or "", data))
-    return await run_in_threadpool(
-        campus_judgment.add_results, _row(proj, db), bundle, got
-    )
+    return await run_in_threadpool(campus_judgment.add_results, _row(proj, db), bundle, got)
 
 
 @router.post("/{name}/psse/{bundle}/emt/judge")
-async def judge_pack(
-    bundle: str,
-    proj: AuthorizedProject = ProjectAccessDep,
-    db: DBSession = Depends(get_db),
-    user: User | None = Depends(optional_user),
-):
+async def judge_pack(bundle: str, proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db),
+                     user: User | None = Depends(optional_user)):
     """Judge one bundle's pack again on the results it holds; replaces the stored judgment."""
     _check_lock(proj, db, user)
     return await run_in_threadpool(campus_judgment.judge, _row(proj, db), bundle)
 
 
 @router.get("/{name}/judgment")
-def get_pack_judgment(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_pack_judgment(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The latest run's stored pack judgment, as the read-back wrote it, with its status counts."""
     return campus_judgment.get_judgment(_row(proj, db))
 
 
 # ── the PowerFactory (DGS) hand-off (grid-compliance 09, item 6) ──
 
-
 @router.get("/{name}/powerfactory")
-def list_powerfactory_bundles(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def list_powerfactory_bundles(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The latest campus run's PowerFactory (DGS) bundles, and whether the run is stale."""
     return ce.powerfactory_bundles(_row(proj, db))
 
 
 @router.get("/{name}/powerfactory/{bundle}/download")
-def download_powerfactory_bundle(
-    bundle: str,
-    proj: AuthorizedProject = ProjectAccessDep,
-    db: DBSession = Depends(get_db),
-):
+def download_powerfactory_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep,
+                                 db: DBSession = Depends(get_db)):
     """One PowerFactory bundle as a zip, picked from the listing as the PSS/E download is."""
     data, stale = ce.powerfactory_bundle_zip(_row(proj, db), bundle)
-    return Response(
-        data,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": content_disposition(f"{bundle}.zip"),
-            "X-Run-Stale": "true" if stale else "false",
-        },
-    )
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(f"{bundle}.zip"),
+                             "X-Run-Stale": "true" if stale else "false"})
 
 
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────
 
-
 @router.get("/{name}/island")
-def get_island(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_island(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The island sidecar as written, and the last island study."""
     return ce.get_island(_row(proj, db))
 
 
 @router.get("/{name}/island/report")
-def island_report(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def island_report(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The island report: its tables, each with the model behind it, the
     screening caveat and the rows that rest on assumed values."""
     from services.campus_island_report import island_report as _report
-
     return _report(_row(proj, db))
 
 
@@ -773,13 +682,10 @@ CutKind = Literal["inertia", "headroom_up", "headroom_down", "droop_gain"]
 
 
 @router.get("/{name}/island/cuts")
-def get_island_cuts(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_island_cuts(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The cuts the last campus run proposes, each with its primal estimate;
     the applied cuts and the trials; the limit (bridge energy gets no cut)."""
     from services import campus_island_cuts as cic
-
     return cic.get_cuts(_row(proj, db))
 
 
@@ -792,18 +698,14 @@ def apply_island_cuts(
     """Apply the proposed cuts, re-solve the hub and rerun the campus study,
     up to three trials (a background job); poll ``GET .../apply``."""
     from services import campus_island_cuts as cic
-
     _check_lock(proj, db, user)
     return cic.start_apply_job(_row(proj, db), user_id=user.id if user else None)
 
 
 @router.get("/{name}/island/cuts/apply")
-def island_cuts_status(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def island_cuts_status(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The apply job's record: state, trials so far, why it stopped."""
     from services import campus_island_cuts as cic
-
     return cic.apply_status(_row(proj, db))
 
 
@@ -815,7 +717,6 @@ def cancel_island_cuts(
 ):
     """Stop the apply job after the trial in hand."""
     from services import campus_island_cuts as cic
-
     _check_lock(proj, db, user)
     return cic.cancel_apply_job(_row(proj, db))
 
@@ -831,7 +732,6 @@ def remove_island_cut(
 ):
     """Take one applied cut back; the next solve no longer has it."""
     from services import campus_island_cuts as cic
-
     _check_lock(proj, db, user)
     return cic.remove_cut(_row(proj, db), period=period, hour=hour, kind=kind)
 
@@ -844,7 +744,6 @@ def clear_island_cuts(
 ):
     """Take every cut back, and the trials with them."""
     from services import campus_island_cuts as cic
-
     _check_lock(proj, db, user)
     return cic.clear_cuts(_row(proj, db))
 
@@ -857,13 +756,10 @@ class GfmSettingsBody(BaseModel):
 
 
 @router.get("/{name}/island/gfm-settings")
-def get_gfm_settings(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_gfm_settings(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The last recommendation (heuristic screening) and whether it is still
     the campus run's: ``{state: not_run|ready|stale, reason, recommendation}``."""
     from services import campus_island_tuning as cit
-
     return cit.get_settings(_row(proj, db))
 
 
@@ -877,11 +773,9 @@ def recommend_gfm_settings(
     """Recommend GFM settings from the last campus run's island hours, as a
     campus job of the solve queue; follow it on the campus state's run job."""
     from services import campus_island_tuning as cit
-
     _check_lock(proj, db, user)
-    return cit.enqueue_settings(
-        _row(proj, db), user, allow_i_max=bool(body.allow_i_max) if body else False
-    )
+    return cit.enqueue_settings(_row(proj, db), user,
+                                allow_i_max=bool(body.allow_i_max) if body else False)
 
 
 GFM_APPLY_TOOL = "campus_apply_gfm_settings"
@@ -899,7 +793,6 @@ def gfm_settings_card(
     """The edit card for applying the recommendation (old → new per unit, the consequences):
     the one the copilot shows for ``campus_apply_gfm_settings``. Writes nothing."""
     from harness import edit_card
-
     with edit_card.for_project(_row(proj, db)):
         return edit_card.preview(GFM_APPLY_TOOL, {}, with_state=False)
 
@@ -918,7 +811,6 @@ def apply_gfm_settings(
     (a 422 without it); the ``receipt`` holds the values read back from both files."""
     from harness import edit_card
     from services import campus_island_tuning as cit
-
     _check_lock(proj, db, user)
     project = _row(proj, db)
     with edit_card.for_project(project):
@@ -930,11 +822,8 @@ def apply_gfm_settings(
 
 # ── the asset library (plan C9) ────────────────────────────────────────────
 
-
 @router.get("/{name}/library")
-def get_library(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_library(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The asset library a study buys from: the project's copy, else the shipped default."""
     return ce.get_library(_row(proj, db))
 
@@ -964,11 +853,8 @@ def reset_library(
 
 # ── the equipment schedule (DC review 09) ─────────────────────────────────
 
-
 @router.get("/{name}/equipment-schedule")
-def get_equipment_schedule(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_equipment_schedule(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """Every electrical asset of the last DC Grid study: rating, quantity,
     governing criterion, source (computed / declared / assumed / not sized)
     and capex; declared ratings below the chosen ones flagged."""
@@ -976,30 +862,19 @@ def get_equipment_schedule(
 
 
 @router.get("/{name}/equipment-schedule.xlsx")
-def get_equipment_schedule_xlsx(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def get_equipment_schedule_xlsx(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The equipment schedule as a workbook: a Schedule and an Assumptions sheet."""
     row = _row(proj, db)
     blob = equipment_schedule.to_xlsx(equipment_schedule.for_project(row))
-    return Response(
-        content=blob,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": content_disposition(
-                f"{row.name}_equipment_schedule.xlsx"
-            )
-        },
-    )
+    return Response(content=blob,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": content_disposition(f"{row.name}_equipment_schedule.xlsx")})
 
 
 # ── the chosen equipment as owner assets (plan, part three D2) ──────────────
 
-
 @router.get("/{name}/owner-assets")
-def owner_assets(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def owner_assets(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """What the investment run bought, as the extra owner assets of the
     investment case: ``{"assets": [...], "source_hash": str | None, "stale": bool,
     "study_method": "milp" | "least_cost" | None, "unresolved": [{"need", "reason"}]}``
@@ -1010,11 +885,8 @@ def owner_assets(
 
 # ── the project's grid codes (plan C10) ────────────────────────────────────
 
-
 @router.get("/{name}/grid-codes")
-def list_grid_codes(
-    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
-):
+def list_grid_codes(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """The shipped, published and draft profiles and the uploaded documents."""
     return gc.list_grid_codes(_row(proj, db))
 
@@ -1031,14 +903,8 @@ async def upload_grid_code_document(
     ``page_ranges`` (``"1-40,120-180"``) selects the pages to read."""
     _check_lock(proj, db, user)
     data = await UploadBudget(gc.MAX_PDF_BYTES).read(file)
-    return await run_in_threadpool(
-        gc.upload_document,
-        _row(proj, db),
-        data,
-        file.filename,
-        file.content_type,
-        page_ranges,
-    )
+    return await run_in_threadpool(gc.upload_document, _row(proj, db), data, file.filename, file.content_type,
+                                   page_ranges)
 
 
 @router.delete("/{name}/grid-codes/documents/{document_id}")
@@ -1063,9 +929,7 @@ async def extract_grid_code(
     """Draft a profile from the document (one API call); every limit is
     extracted until a person confirms it."""
     _check_lock(proj, db, user)
-    return await run_in_threadpool(
-        gc.extract, _row(proj, db), document_id, body.profile_id, body.overwrite
-    )
+    return await run_in_threadpool(gc.extract, _row(proj, db), document_id, body.profile_id, body.overwrite)
 
 
 @router.post("/{name}/grid-codes/drafts")
@@ -1081,11 +945,8 @@ def new_grid_code_draft(
 
 
 @router.get("/{name}/grid-codes/drafts/{profile_id}")
-def get_grid_code_draft(
-    profile_id: str,
-    proj: AuthorizedProject = ProjectAccessDep,
-    db: DBSession = Depends(get_db),
-):
+def get_grid_code_draft(profile_id: str, proj: AuthorizedProject = ProjectAccessDep,
+                        db: DBSession = Depends(get_db)):
     return gc.get_draft(_row(proj, db), profile_id)
 
 
@@ -1141,11 +1002,8 @@ def publish_grid_code(
 
 
 @router.get("/{name}/grid-codes/published/{profile_id}")
-def get_published_grid_code(
-    profile_id: str,
-    proj: AuthorizedProject = ProjectAccessDep,
-    db: DBSession = Depends(get_db),
-):
+def get_published_grid_code(profile_id: str, proj: AuthorizedProject = ProjectAccessDep,
+                            db: DBSession = Depends(get_db)):
     return gc.get_published(_row(proj, db), profile_id)
 
 
