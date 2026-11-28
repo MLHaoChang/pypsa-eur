@@ -17,6 +17,7 @@ Guided, Expert and the report, for every template (GK A 33 S1-S7).
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import pathlib
@@ -202,7 +203,7 @@ def test_an_extendable_import_link_is_no_limit_never_a_number_or_within():
     assert p["grid_connection_mw"] is None and p["connection_check"] is None
     assert "sized by the optimisation" in p["grid_connection_refusal"]
     assert dict(E._t_sizing(p).rows)[GRID_ROW].startswith(
-        "not established: The grid import link"
+        "Not established: The grid import link"
     )
 
 
@@ -329,7 +330,8 @@ def test_peak_import_against_the_limit_at_the_tolerance(over, verdict):
     assert p["grid_import_peak_mw"] == pytest.approx(40.0 + over, abs=1e-12)
     assert p["connection_check"] == verdict
     row = dict(E._t_sizing(p).rows)[GRID_ROW]
-    assert ("EXCEEDS the limit" in row) is (verdict == "exceeds")
+    assert ("exceeds the limit" in row) is (verdict == "exceeds")
+    assert ("within the limit" in row) is (verdict == "within")
 
 
 def test_export_is_not_import():
@@ -346,7 +348,9 @@ def test_multi_period_peak_is_checked_per_period():
     p = _with_import(n, flow)
     assert p["grid_import_peak_by_period"] == {"2027": 10.0, "2030": 56.0, "2035": 10.0}
     assert p["connection_check"] == "exceeds"
-    assert dict(E._t_sizing(p).rows)[GRID_ROW].endswith("EXCEEDS the limit in 2030")
+    assert dict(E._t_sizing(p).rows)[GRID_ROW].endswith(
+        "peak import 56.0 MW · exceeds the limit by 1.0 MW · in 2030"
+    )
 
 
 def test_unsolved_network_has_no_peak_or_check():
@@ -371,7 +375,7 @@ def test_a_shortfall_that_delivered_is_its_own_row_never_in_the_total():
         5.0 * float(n.snapshot_weightings.generators.iloc[0])
     )
     rows = dict(E._t_sizing(p).rows)
-    assert rows["Shortfall, NH3 shortfall (not counted)"].startswith("32.3 MW_NH3; ")
+    assert rows["Shortfall, NH3 shortfall (not counted)"].startswith("32.3 MW_NH3 · ")
     assert not any(k.startswith("Bought in") for k in rows)  # bought nothing: no row
 
 
@@ -431,6 +435,159 @@ def test_an_old_stored_report_hashes_and_renders_as_on_master():
         ev.tables["sizing"].caption
         == "Installed capacity of the least-cost plan by carrier"
     )
+
+
+#: A sizing payload as stored since #1786 (it carries ``grid_connection_mw``).
+POST_1786 = {
+    "sections": {
+        "sizing": {
+            "status": "ok",
+            "note": None,
+            "payload": {
+                "by_carrier": {"gas": 40.0, "solar": 4.0},
+                "total_p_nom_mw": 44.0,
+                "grid_connection_mw": 40.0,
+                "grid_connection_refusal": None,
+                "grid_supply_mw": 500.0,
+                "grid_supply_counted": [],
+                "grid_import_peak_mw": 41.0,
+                "grid_import_peak_by_period": None,
+                "connection_check": "exceeds",
+                "product_slacks": [
+                    {
+                        "name": "__lost_nh3",
+                        "process_role": "shortfall",
+                        "carrier": "NH3 shortfall",
+                        "p_nom": 32.3,
+                        "energy": 52.1,
+                        "unit": "MW_NH3",
+                        "energy_unit": "MWh_NH3",
+                    }
+                ],
+                "assets": [
+                    {
+                        "component": "Generator",
+                        "name": "genset_new",
+                        "carrier": "gas",
+                        "built_mw": 36.67,
+                        "min_mw": 0.0,
+                        "max_mw": 40.0,
+                        "unit": "MW",
+                    }
+                ],
+                "assets_solved": True,
+            },
+        }
+    }
+}
+
+
+def test_a_post_1786_report_moves_its_hash_once_with_the_reworded_rows():
+    """GK A 40 P5: the reworded rows (UX 34) move the hash of a report stored
+    since #1786, as guided-results 04's ruled renames did, so the report reads
+    "study_changed" and asks to be redrafted once (routers/reports' stale
+    path); collecting its evidence raises nothing. master d195f4f6 hashed it
+    e75ecc0f... ; the pre-key OLD pin above is unchanged."""
+    ev = E.collect_evidence(
+        study_report=None, eh_report=copy.deepcopy(POST_1786), worksheet=None
+    )
+    now = E.evidence_hash(ev)
+    assert now != "e75ecc0f236eaaf5f859820149689ba9207d4d3542d24fd443b009f98f99d309"
+    assert now == "5ee532249b25f87678098a29ef08b11b3104a854cd2b25aed2eb78a19a4913df"
+
+
+def _cell(**kw) -> str:
+    p = {"grid_connection_mw": 40.0, "connection_check": "exceeds", **kw}
+    return E._connection_cell(p)
+
+
+@pytest.mark.parametrize(
+    "excess,words",
+    [
+        (1.1 * TOL, "by less than 0.1 MW"),
+        (0.049, "by less than 0.1 MW"),
+        (0.05, "by 0.1 MW"),
+        (2.8, "by 2.8 MW"),
+    ],
+)
+def test_the_excess_rounds_in_words_only(excess, words):
+    """GK A 40 P3: the verdict is the payload's; "less than 0.1 MW" exactly for
+    an excess below 0.05, the 1e-6 tolerance still reads as an excess."""
+    cell = _cell(grid_import_peak_mw=40.0 + excess)
+    assert (
+        cell
+        == f"40.0 MW · peak import {F_fmt(40.0 + excess)} · exceeds the limit {words}"
+    )
+
+
+def F_fmt(v: float) -> str:
+    return f"{v:,.1f} MW"
+
+
+def test_every_period_over_the_limit_is_named():
+    by = {
+        "2027": 40.0 + 0.9 * TOL,
+        "2030": 41.0,
+        "2035": 40.0 + 1.1 * TOL,
+        "2040": 45.0,
+    }
+    assert _cell(grid_import_peak_mw=45.0, grid_import_peak_by_period=by).endswith(
+        "exceeds the limit by 5.0 MW · in 2030, 2035 and 2040"
+    )
+    by2 = {"2030": 41.0, "2035": 39.0}
+    assert _cell(grid_import_peak_mw=41.0, grid_import_peak_by_period=by2).endswith(
+        "· in 2030"
+    )
+    by3 = {"2030": 41.0, "2035": 42.0}
+    assert _cell(grid_import_peak_mw=42.0, grid_import_peak_by_period=by3).endswith(
+        "· in 2030 and 2035"
+    )
+
+
+def test_slack_units_are_the_payloads_and_the_horizon_is_named():
+    """GK A 40 P3, UX 34: the units come from the payload (a tonne bus reads
+    t/h · t), and the energy names its horizon."""
+    slack = {
+        "name": "__lost_ore",
+        "process_role": "shortfall",
+        "carrier": "concentrate",
+        "p_nom": 12.0,
+        "energy": 3.5,
+        "unit": "t/h",
+        "energy_unit": "t",
+    }
+    rows = E._slack_rows({"product_slacks": [slack], "horizon": "2027–2035"})
+    assert rows == [
+        [
+            "Shortfall, concentrate (not counted)",
+            "12.0 t/h · 3.5 t over the horizon (2027–2035)",
+        ]
+    ]
+    assert (
+        E._slack_rows({"product_slacks": [slack]})[0][1]
+        == "12.0 t/h · 3.5 t over the horizon"
+    )
+
+
+@pytest.mark.parametrize(
+    "tid,words", [("eh_ammonia_staged", "2027–2035"), ("eh_datacenter", "8,760 h")]
+)
+def test_the_horizon_is_the_networks(tid, words):
+    n = _build(tid)
+    if len(n.investment_periods):
+        words = f"{int(n.investment_periods[0])}–{int(n.investment_periods[-1])}"
+    else:
+        words = f"{float(n.snapshot_weightings.generators.sum()):,.0f} h"
+    assert R.sizing_summary_from_network(n)["horizon"] == words
+
+
+def test_the_no_request_refusal_names_no_internal_key_and_says_what_to_do():
+    """GK A 40 P4: plain words, a step the GUI offers (the link's role)."""
+    assert "eh_" not in R.NO_REQUEST_REFUSAL
+    assert R.NO_REQUEST_REFUSAL.endswith("set the grid link's role to Grid import.")
+    assert E._connection_cell(
+        {"grid_connection_mw": None, "grid_connection_refusal": R.NO_REQUEST_REFUSAL}
+    ) == (f"Not established: {R.NO_REQUEST_REFUSAL}")
 
 
 # ── the UI's figures (fixture) ──────────────────────────────────────────────
@@ -818,3 +975,31 @@ def test_a_period_with_no_import_peaks_at_zero():
     flow.loc[2030] = -20.0
     p = _with_import(n, flow)
     assert p["grid_import_peak_by_period"] == {"2027": 10.0, "2030": 0.0, "2035": 10.0}
+
+
+# ── guards the PR A mutants named (GK A 40 P6) ──────────────────────────────
+
+
+def test_a_peak_with_no_verdict_or_a_verdict_with_no_peak_shows_the_limit_alone():
+    assert _cell(grid_import_peak_mw=30.0, connection_check=None) == "40.0 MW"
+    assert _cell(grid_import_peak_mw=None, connection_check="within") == "40.0 MW"
+
+
+def test_a_period_exactly_at_the_tolerance_is_not_named():
+    by = {"2030": 40.0 + TOL, "2035": 41.0}
+    assert _cell(grid_import_peak_mw=41.0, grid_import_peak_by_period=by).endswith(
+        "· in 2035"
+    )
+
+
+def test_a_refusal_with_no_words_still_says_why():
+    assert E._connection_cell({"grid_connection_mw": None}) == (
+        "Not established: the network sets no connection limit."
+    )
+
+
+def test_one_period_and_no_snapshots_name_their_horizon():
+    n = pypsa.Network()
+    n.set_snapshots(pd.MultiIndex.from_product([[2030], range(3)]))
+    n.investment_periods = [2030]
+    assert R._horizon_words(n) == "2030"

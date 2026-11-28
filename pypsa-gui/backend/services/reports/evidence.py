@@ -531,32 +531,48 @@ def _t_frontier(payload: dict) -> EvidenceTable:
 NEW_SIZING_KEY = "grid_connection_mw"
 
 
+def _and(items: list[str]) -> str:
+    """"2030", "2030 and 2035", "2027, 2030 and 2035"."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def _connection_cell(payload: dict) -> str:
-    """The connection's limit and the peak import checked against it; the
-    refusal's words where the network fixes no limit, never a number."""
+    """The connection's limit and the peak import checked against it, its
+    figures apart by "·"; the refusal's own sentence where the network fixes
+    no limit, never a number (issue template-e2e 20, UX 34, GK A 40 P3). The
+    verdict is the payload's (``peak > limit + 1e-6``); only the excess's
+    words round, and every period over the limit is named."""
     check = payload.get("connection_check")
     if check == "unbounded":
         return ("unbounded connection: a grid generator sits at the point of "
                 "connection with no import link, so no limit applies")
     limit = payload.get("grid_connection_mw")
     if limit is None:
-        return f"not established: {payload.get('grid_connection_refusal') or 'no connection limit'}"
+        return ("Not established: "
+                f"{payload.get('grid_connection_refusal') or 'the network sets no connection limit.'}")
     cell = F.fmt_number(limit, unit="MW", digits=1)
     peak = payload.get("grid_import_peak_mw")
-    if peak is not None and check in ("within", "exceeds"):
-        cell += (f"; peak import {F.fmt_number(peak, unit='MW', digits=1)}, "
-                 f"{'within' if check == 'within' else 'EXCEEDS'} the limit")
-        over = [k for k, v in (payload.get("grid_import_peak_by_period") or {}).items()
-                if v > limit + CONNECTION_TOL_MW]
-        if over:
-            cell += f" in {', '.join(over)}"
-    return cell
+    if peak is None or check not in ("within", "exceeds"):
+        return cell
+    cell += f" · peak import {F.fmt_number(peak, unit='MW', digits=1)}"
+    if check == "within":
+        return cell + " · within the limit"
+    # Rounded first: 40.05 - 40 is 0.04999..., an excess of 0.05 all the same.
+    excess = round(peak - limit, 9)
+    cell += (" · exceeds the limit by less than 0.1 MW" if excess < 0.05 else
+             f" · exceeds the limit by {F.fmt_number(excess, unit='MW', digits=1)}")
+    over = [k for k, v in (payload.get("grid_import_peak_by_period") or {}).items()
+            if v > limit + CONNECTION_TOL_MW]
+    return cell + (f" · in {_and(over)}" if over else "")
 
 
 def _slack_rows(payload: dict) -> list[list[str]]:
     """A product's shortfall or buy-in that delivered energy: its own row,
-    never in the total and never hidden (GK A 33 S3)."""
+    never in the total and never hidden (GK A 33 S3). Its size and energy in
+    their bus's units, and the horizon the energy is over."""
     words = {"shortfall": "Shortfall", "buy_in": "Bought in"}
+    horizon = payload.get("horizon")
+    over = f"over the horizon ({horizon})" if horizon else "over the horizon"
     rows = []
     for s in payload.get("product_slacks") or []:
         energy = s.get("energy")
@@ -564,8 +580,8 @@ def _slack_rows(payload: dict) -> list[list[str]]:
             continue
         rows.append([f"{words.get(s.get('process_role'), s.get('process_role'))}, "
                      f"{s.get('carrier') or s.get('name')} (not counted)",
-                     f"{F.fmt_number(s.get('p_nom'), unit=s.get('unit'), digits=1)}; "
-                     f"{F.fmt_number(energy, unit=s.get('energy_unit'), digits=1)} over the horizon"])
+                     f"{F.fmt_number(s.get('p_nom'), unit=s.get('unit'), digits=1)} · "
+                     f"{F.fmt_number(energy, unit=s.get('energy_unit'), digits=1)} {over}"])
     for line in payload.get("grid_supply_counted") or []:
         rows.append(["Grid supply counted", str(line)])
     return rows
