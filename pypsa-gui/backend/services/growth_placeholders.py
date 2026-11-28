@@ -311,6 +311,25 @@ def _ledger_of(meta: dict) -> list | None:
     return ledger if isinstance(ledger, list) else None
 
 
+def _dc_load_of(now, then):
+    """The data-centre block as ``then`` had it (``dc_load_update``: an edit
+    that rewrote the IT and cooling series pushed an undo step), except the
+    backup setting and the saved network's backup mode, which a write that is
+    not on the undo stack (``dc_backup.save_backup``) owns and which stay as
+    they are now (UM10-UNDO-1). None when either side has no such block."""
+    if not isinstance(now, dict) or not isinstance(then, dict) \
+            or not isinstance(now.get("spec"), dict) or not isinstance(then.get("spec"), dict):
+        return None
+    out = {**then, "spec": dict(then["spec"])}
+    for holder, key in ((out["spec"], "backup"), (out, "network_backup_mode")):
+        src = now["spec"] if holder is out["spec"] else now
+        if key in src:
+            holder[key] = src[key]
+        else:
+            holder.pop(key, None)
+    return out
+
+
 def _with_growth_of(current: dict, old: dict) -> dict | None:
     """``current`` with the keys an edit writes (``mark_set``) as ``old`` has
     them (UM10-UNDO-1): ``growth_inputs``, and the ``placeholder <kind>
@@ -322,6 +341,9 @@ def _with_growth_of(current: dict, old: dict) -> dict | None:
     if now is None or then is None:
         return None
     out = dict(current)
+    out_dc = _dc_load_of(current.get("dc_load"), old.get("dc_load"))
+    if out_dc is not None:
+        out["dc_load"] = out_dc
     if "growth_inputs" in old:
         out["growth_inputs"] = old["growth_inputs"]
     else:

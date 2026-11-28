@@ -25,6 +25,7 @@ PUT    /api/campus-electrical/{name}/campus  write path:name
 POST   /api/campus-electrical/{name}/dc-architecture/compare  write path:name
 PUT    /api/campus-electrical/{name}/dc-backup  write path:name
 POST   /api/campus-electrical/{name}/dc-backup/assess  write path:name
+PUT    /api/campus-electrical/{name}/dc-load  write path:name
 POST   /api/campus-electrical/{name}/draft  write path:name
 POST   /api/campus-electrical/{name}/grid-codes/documents  write path:name
 DELETE /api/campus-electrical/{name}/grid-codes/documents/{document_id}  write path:name

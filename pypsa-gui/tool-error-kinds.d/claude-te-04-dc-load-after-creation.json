@@ -1,0 +1,1 @@
+{"kinds": {"dc_load_busy": {"surface": "inline", "why": "PUT /api/campus-electrical/{name}/dc-load answers 409: the project's template metadata is busy (another marker write or an undo holds it). Nothing was changed; retry the same edit."}}}

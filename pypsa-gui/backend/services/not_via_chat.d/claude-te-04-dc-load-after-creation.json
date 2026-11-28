@@ -1,0 +1,12 @@
+{
+ "entries": [{
+  "id": "dc_load_after_creation",
+  "title": "Data-centre PUE, critical share, backup mode and architecture after creation",
+  "disposition": "unbuilt",
+  "reason": "Changing a data-centre project's PUE, critical share, backup mode or architecture after creation is not available from chat yet. Change them in the Load and Backup sections of the set-up.",
+  "page": "Set up site",
+  "panel": null,
+  "keywords": ["pue", "critical"],
+  "routes": [["PUT", "/api/campus-electrical/{name}/dc-load"]]
+ }]
+}

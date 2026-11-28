@@ -313,8 +313,7 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
         _dc_backup(n, "eh_datacenter_staged", load_spec, phases.planning)
         return n
     if load_spec is not None:
-        _apply_dc_profile(n, load_spec, snaps, _single_year_phase(load_spec, planning).it_mw,
-                          timezone=_dc_timezone("eh_datacenter"))
+        apply_dc_profile_to_network(n, "eh_datacenter", load_spec, planning)
         _dc_backup(n, "eh_datacenter", load_spec, planning)
     # The campus as it stands is in service and sunk, as the staged campus's
     # first period and the single-year H2 hub (WALK-IMPROVE-1 b): a typed
@@ -646,14 +645,7 @@ def _staged_datacenter(n: pypsa.Network, plan: _DcPlan, load_spec=None) -> pypsa
             for load in ("it_load", "cooling"):
                 p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
     else:
-        from services.dc_it_energy import phase_in_service
-
-        tz = _dc_timezone("eh_datacenter_staged")
-        for y in years:
-            # One phase per period by COD year (dc_load_spec checks it); the
-            # business case's IT energy reads the same rule (DC business case 03).
-            it_mw = phase_in_service(load_spec, date(y, 12, 31)).it_mw
-            _apply_dc_profile(n, load_spec, SNAPSHOTS, it_mw, timezone=tz, period=y)
+        apply_dc_profile_to_network(n, "eh_datacenter_staged", load_spec, plan.planning)
     # The energization schedule in MW (`services.adequacy.energization`): a
     # solve turns it into p_max_pu = min(own, E / p_nom), so a lever or an
     # overlay that rewrites p_nom composes as min(E, cap) instead of
@@ -744,6 +736,24 @@ def _single_year_phase(spec, planning: Planning | None = None):
     from services.dc_it_energy import phase_in_service
 
     return phase_in_service(spec, _week(planning)[0].date())
+
+
+def apply_dc_profile_to_network(n, template_id: str, spec, planning: Planning | None = None) -> None:
+    """Write the spec's facility load onto ``it_load`` and ``cooling`` of the
+    whole network: the single-year campus from its one phase, the staged
+    campus per period from the phase in service that year. The one writer:
+    creation and a later update of the spec both call it."""
+    tz = _dc_timezone(template_id)
+    if template_id == "eh_datacenter_staged":
+        from services.dc_it_energy import phase_in_service
+
+        for y in (int(y) for y in n.investment_periods):
+            # One phase per period by COD year (dc_load_spec checks it); the
+            # business case's IT energy reads the same rule (DC business case 03).
+            it_mw = phase_in_service(spec, date(y, 12, 31)).it_mw
+            _apply_dc_profile(n, spec, SNAPSHOTS, it_mw, timezone=tz, period=y)
+    else:
+        _apply_dc_profile(n, spec, n.snapshots, _single_year_phase(spec, planning).it_mw, timezone=tz)
 
 
 def _apply_dc_profile(n, spec, snapshots, it_mw: float, *, timezone, period=None) -> None:
