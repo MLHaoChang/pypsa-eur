@@ -3,7 +3,7 @@
 
 # 18 — Cost and capacity headline figures disagree or are missing
 
-Status: ready-for-agent
+Status: done (#2135 backend, #2140 UI; follow-ups below stay open)
 Impact: high (raised 2026-11-20, UX 3 review of #1777)
 Templates: DC staged, H2 staged, microgrid (both), ammonia, DC
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -38,4 +38,6 @@ Checked by code reading only; the app was not re-run. Still true: `HeadlineStrip
 - Follow-up B (not in this issue): when there is no LOPF solve, the results routes could read the study's own solve instead of showing "No cost breakdown / No capacities". Left out because it changes which network the results routes read. That is engine-side work for a GK B plan.
 - Follow-up (logging, UX 34): move the Summary section's cost formatting from `fmtCurrency` onto `utils/money.ts` `money()`, so the Summary and Guided format money the same way.
 - "Loading the headline figures…" stuck: the te 18 build session (session_01G7qCummqEbKc27vW74JbWt) could not reproduce it on microgrid staged or ammonia. The empty-summary half is covered by the breakdown-unreadable sentence. Reopen with a project file if it is seen again.
+- Empty Summary beside an "Out of date" pill (UX 34 on #2140): diagnosed and fixed in #2140. Partial results after a solve fell into "No … for this solve", and the statistics query sat outside the results cache root. The parts not reproduced ("No results yet" after a backend restart, an open page missing a solve started elsewhere) are issue 51.
+- Follow-up (UX 34, non-blocking): the solve's phase line "Auto-discount setup failed: {exc}" (`services/solver/assumptions.py`, moved in #2135) shows raw exception text. Give it plain words.
 - Outside the acceptance and still open: ammonia delivered > made (785 kt vs 672 kt), and "Achieved 0.00‱" on the study card.

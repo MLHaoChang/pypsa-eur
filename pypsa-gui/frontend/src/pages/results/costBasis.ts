@@ -14,6 +14,8 @@
 import type { ObjectiveDecomposition } from '../../api/results'
 import type { FlowSection } from '../../api/flow'
 import { money } from '../../utils/money'
+// te 20's one-decimal figure, so the note and the grid-connection row agree to the digit (te 18 / te 20).
+import { fmt1 } from './notCounted'
 import { signFirstEuro } from '../../utils/format'
 import type { SimulationStatus } from '../../api/types'
 
@@ -131,8 +133,6 @@ export function objectiveConstant(dec: ObjectiveDecomposition | null | undefined
 
 type ConnectionSection = Pick<FlowSection, 'state' | 'connection_limit'>
 
-/** One decimal, as the study report writes the connection limit (`f"{v:,.1f}"`): "40.0", "1,250.0". */
-const mw1 = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
 /**
  * Key capacities' line for the grid supply it does not list (template-e2e 18), read from the flow's connection
@@ -144,6 +144,6 @@ export function gridSupplyWords(conn: ConnectionSection | null | undefined): str
   if (conn == null) return null
   if (conn.state === 'not_needed') return 'Grid supply: none, the site runs off the grid.'
   const limit = conn.connection_limit
-  if (limit?.mw != null) return `Grid supply: up to ${mw1(limit.mw)} MW, through the site's connection.`
+  if (limit?.mw != null) return `Grid supply: up to ${fmt1(limit.mw, 'MW')}, through the site's connection.`
   return `Grid supply is not listed: ${limit?.refusal ?? "what the site can import is its connection's rating."}`
 }
