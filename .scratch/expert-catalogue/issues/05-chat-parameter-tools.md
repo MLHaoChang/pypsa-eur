@@ -33,3 +33,4 @@ Depends on: 01. Opens after #1575, #1590 and #1586 merge (GK B ruling on #1597).
 ## Comments
 
 - 2026-11-21, slice 02c (raw-name guard): `pages/hubDesign/delegate.ts` (Site card fix requests sent to the assistant: `grid_import`, `outage_rate_value`, `mttr_hours`) has allow rows in `pypsa-gui/frontend/src/uiCopyGuard.allow.json` naming this slice. Remove them when the requests use plain names.
+- 2026-11-28, part A (backend; GK B2 plan GO with P1–P8): `find_parameter`, `open_parameter`, `plain_names` and a `plain_name` key on refusals from the generic write tools, the prompt line, and the scorer's raw-name count. The case tables are shared with vitest (`backend/tests/data/catalogue_search_cases.json`, `asset_type_match_cases.json`). The checked answers' method notes are follow-up issue 12. Part B (display replacement in text and speech, the `delegate.ts` allow rows) follows after #2128.

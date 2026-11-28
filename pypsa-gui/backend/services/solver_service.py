@@ -93,6 +93,7 @@ from services.validation_service import has_errors, validate_for_run
 from services.solver import fixed_sizes as _fixed_sizes
 from services.solver import operational as _operational
 from services.solver import operational_gap as _operational_gap
+from services.solver import assumptions as _assumptions
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
@@ -1056,7 +1057,7 @@ def run_simulation(
                 _energization_undo = lambda: None   # noqa: E731
                 try:
                     _energization_undo = apply_energization(network)
-                    _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                    _real_restore, captured = _apply_modelling_assumptions(network, config, phase, sclopf=use_sclopf)
                 except BaseException:
                     _energization_undo()
                     _ic_conn.undo()
@@ -1170,20 +1171,17 @@ def run_simulation(
                 # myopic+sclopf feature, `_run_myopic_foresight` dispatches
                 # internally to `optimize_security_constrained` per iteration,
                 # so myopic now subsumes SCLOPF when both are enabled.
-                use_myopic = (
-                    getattr(config, "solve_strategy", "full") == "myopic"
-                    and config.multi_investment_periods
-                )
+                # The one decision the solve's stamp records too (template-e2e 18).
+                _dispatched = _assumptions.dispatched_strategy(config, sclopf=use_sclopf)
+                use_myopic = _dispatched == "myopic"
                 # DC 07: an operational run (rolling on fixed sizes) never falls
                 # back to the full horizon below; it is refused instead (C6).
                 _operational.fallback_refusal(config, sclopf=use_sclopf)
                 network.meta.pop(_operational.META_KEY, None)
                 _operational_gap.clear(network)  # DC 07 S3: a gap never outlives its run (C25)
-                use_rolling = (
-                    getattr(config, "solve_strategy", "full") == "rolling"
-                    and not use_sclopf
-                )
-                if use_rolling and config.multi_investment_periods:
+                use_rolling = _dispatched == "rolling"
+                if (getattr(config, "solve_strategy", "full") == "rolling" and not use_sclopf
+                        and config.multi_investment_periods):
                     phase(
                         "Rolling-horizon is incompatible with multi-investment "
                         "periods (PyPSA's optimize_with_rolling_horizon solves "
@@ -1552,6 +1550,8 @@ def run_simulation(
                     commit_dsr(network, captured.get("dsr_t"), captured.get("dsr_total_mwh"))
                     # DC-07 S2: the curtailed energy, apart from unserved energy.
                     _dc_curtailment.commit(network, captured)
+                    # Template-e2e 18: the basis this solve was priced on, stamped only now it succeeded.
+                    _assumptions.commit_solve_basis(network, captured)
                     # Published only after a successful solve, like the commit
                     # (WP1.5a review #6); None after a plain successful solve.
                     _emit_state(last_commercial_terms=(

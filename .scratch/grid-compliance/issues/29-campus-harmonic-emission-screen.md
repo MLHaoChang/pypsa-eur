@@ -3,7 +3,7 @@
 
 # 29 Campus run: harmonic emission screen, with the background harmonics at the PCC
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (GC-05 output; split from 09 item 6)
 Gated: yes (GK A2 (8) conditions below, + UX)

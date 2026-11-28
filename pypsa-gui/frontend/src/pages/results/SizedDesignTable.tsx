@@ -6,6 +6,10 @@ import AssetName from '../../components/AssetName'
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { componentLabel } from '../../utils/componentLabels'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { useState } from 'react'
+import { notCountedRows } from './notCounted'
+
+const SLACK_FOLD = 5
 
 // A solver's -0 or 1e-9 reads 0, never "-0".
 const num = (v: number): string =>
@@ -87,7 +91,15 @@ export function SizedDesignTable({ report, mode, testId }: {
   // Section 5's rows carry each asset's unit from its bus (MW or t/h).
   const { flow } = useProjectFlow()
   const units = heldUnits(flow?.sections?.find(x => x.section === 'assets')?.holds)
-  if (rows.length === 0) return null
+  const section = report?.sections?.sizing
+  const left = section?.status === 'ok' ? notCountedRows(section.payload) : null
+  const [showAll, setShowAll] = useState(false)
+  // More than SLACK_FOLD shortfall / buy-in rows fold behind "Show all" (UX 34).
+  const slackIdx = (left ?? []).flatMap((r, i) => (r.kind === 'slack' ? [i] : []))
+  const hidden = new Set(showAll || slackIdx.length <= SLACK_FOLD ? [] : slackIdx.slice(SLACK_FOLD))
+  const shownLeft = (left ?? []).filter((_, i) => !hidden.has(i))
+  const hiddenSlacks = hidden.size
+  if (rows.length === 0 && !left) return null
   // The row's own unit (the report prints the same); a report stored before
   // rows carried one falls back to section 5's.
   const unitOf = (a: EhSizedAsset): SizeUnit =>
@@ -101,6 +113,7 @@ export function SizedDesignTable({ report, mode, testId }: {
         : 'text-[10px] font-semibold uppercase tracking-wide text-muted'}>
         Sized design
       </span>
+      {rows.length > 0 && (<>
       <div className="overflow-x-auto">
         <table className={`w-full ${guided ? 'text-[12px]' : 'text-[10px]'}`}>
           <thead className="text-muted">
@@ -129,6 +142,39 @@ export function SizedDesignTable({ report, mode, testId }: {
       <span className="text-[10px] text-muted">
         Sizes the reliability study chose for the assets marked “sized by the study”.
       </span>
+      </>)}
+      {left && (
+        // The report's own rows after its Total: never summed into installed
+        // capacity (issue template-e2e 20, GK A 33 S1–S3).
+        <div data-testid={`${testId}-not-counted`} className="mt-1 flex flex-col gap-0.5">
+          <span className={guided ? 'text-[11px] font-semibold text-text'
+            : 'text-[10px] font-semibold uppercase tracking-wide text-muted'}>
+            Not counted as installed capacity
+          </span>
+          <table className={`w-full ${guided ? 'text-[12px]' : 'text-[10px]'}`}>
+            <tbody>
+              {shownLeft.map((r, i) => (
+                <tr key={`${r.label}-${i}`} data-testid={`${testId}-not-counted-${i}`}
+                  className="border-t border-border/50 align-top">
+                  <td className={cell}>{r.label}</td>
+                  {/* Figures right-aligned in mono, a sentence left in the text font; the over-limit
+                      verdict is the payload's, in words and in warn colour. */}
+                  <td className={`${cell}${r.sentence ? ' text-left' : ' text-right font-mono'}${r.warn ? ' text-warn' : ''}`}>
+                    {r.value}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {hiddenSlacks > 0 && (
+            <button type="button" data-testid={`${testId}-not-counted-more`}
+              className="self-start text-[10px] text-text underline"
+              onClick={() => setShowAll(true)}>
+              ({hiddenSlacks} more) Show all
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

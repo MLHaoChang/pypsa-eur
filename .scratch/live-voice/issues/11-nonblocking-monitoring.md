@@ -3,9 +3,9 @@
 
 # Nonblocking domain jobs, recoverable monitoring and results refresh
 
-Status: ready-for-agent; audit 2026-11-19: 11a, 11b, 11c-1, 11c-2 merged (#1543, #1548, #1550, #1556); left besides: adapters for all families, wait_for_job, D-I2, D-C1
+Status: ready-for-agent; audit 2026-11-28: 11a, 11b, 11c-1, 11c-2 merged (#1543, #1548, #1550, #1556); `fg:`, `ad:` (study) and `rpt:` (report) wait adapters are on master (`harness/job_adapters.py`); left: queue/GridSpine/other families in the D-C1 matrix, D-I2 cursor recovery across families
 Type: task
-Blocked by: 02, 08, 09
+Blocked by: 02, 08, 09 (all done); nothing else
 
 Implement steps 4 and 6 of [the plan](../../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)
 following [coverage contract](../application-coverage.md). Inventory asynchronous
@@ -181,3 +181,7 @@ again" is a follow-up if UX wants it. Conditions:
   control-matrix checks.
 
 - 2026-11-23 status sweep: landed in #1543 (0ed6dd9f5b); #1548 (53a7765760); #1550 (051ac658dc); #1556 (537876d32b): 11a, 11b, 11c-1, 11c-2. Remains: adapters for all families, wait_for_job, D-I2, D-C1.
+
+## Audit (2026-11-28)
+
+- 2026-11-28 audit: `job_adapters.py` carries ForegroundJob, StudyJob and ReportJobHandle with `wait_foreground_job`, `wait_study_job`, `wait_report_job` and `_Cursor`; AA 04 S7 maps `wait_for_job` on `ad:`, `rpt:` and queue jobs. The Status line of 2026-11-19 listed wait_for_job as left; that part is done. Left: (1) put solve-queue and GridSpine in the D-C1 multi-family matrix, (2) D-I2 cursor recovery across families (gaps, duplicates, reordering), (3) the follow-ups filed from #1556 (18 secret key, 19 Expert Progress block twice, 20 clean proxy close). The next step is a plan to GK B, so the session starts with a plan. Model: opus. Nothing blocks it.

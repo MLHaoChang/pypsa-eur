@@ -3,7 +3,7 @@
 
 # 20 — The size of what the study chose to build is not shown in results
 
-Status: ready-for-agent
+Status: done (#2138, #2139)
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: blocks decision
 Journey fit: results → decide. A user cannot justify an investment without the MW/MWh to build.
@@ -46,3 +46,5 @@ GK A 33 NOT OK @06ba9e54, both fixed in #1786: the peak import is clipped at 0 (
 Checked by code reading only; the app was not re-run. Partly done: #1734 (merged) added `SizedDesignTable.tsx`, shown in section 10, the reference-design panel and section 5, with sizes in each asset's own unit. Remaining, to re-check in the app first: the report lists every built asset per stage; a placeholder grid capacity and shortfall are not counted as installed capacity and the total is checked against the connection limit; Guided, Expert and report show the same figures (a test per template). Gated: GK A. Blocked by: none.
 
 - 2026-11-23 status sweep: landed in #1734 (ca90503f); #1786 (f08b8d44); #1787 (ce38457d): SizedDesignTable with per-unit sizes; report lists every sized asset by stage. Remains: grid supply and slack left out of installed capacity, and a per-template Guided/Expert/report parity test.
+
+- 2026-11-28 (session_01G7qCunbh4s7ttvU3LsFMzP): GK A (40) GO on the remaining work, as two PRs. PR A (backend, GK A P1–P6): follow-up (b) is closed by one predicate, `flow_service.site_equipment_on`, which `_site_assets` and `eh_report._connection` both read. It also rewords the report's connection and slack rows (UX 34). PR B (frontend, UX 34) is stacked on it: Guided and Expert show the report's rows after its Total, with a per-template parity fixture. Follow-up (a), `eh_study.py` passing the study's request, stays with te 09+12 (GK A 40), because that builder owns `eh_study.py`. te 18's successor will read `import_capacity` and `notCounted.ts` for its grid-supply note (te 18, 2026-11-28). Follow-up (a) also covers the off-grid case (GK A 40): an off_grid request makes `_connection` return check "off_grid", rendered as "none, the site runs off the grid" (te 18's words). Until then an off-grid report shows "20.0 MW · peak import 0.0 MW · within the limit", which is not counted in the total. The underlying defect, `import_capacity` ignoring `p_max_pu`, is filed as template-e2e 51.

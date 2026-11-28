@@ -1,0 +1,329 @@
+{
+ "about": "Shared by tests/test_catalogue_lookup.py (services/asset_schema/lookup.py asset_type_of) and frontend/src/utils/assetTypes.parity.test.ts (matchType): the asset type a component is drawn as. members (default: every bus) are the site's buses, which only the frontend checks (a rule's port); a case where the answers differ says so in why.",
+ "cases": [
+  {
+   "why": "rooftop PV by carrier",
+   "cls": "Generator",
+   "row": {
+    "name": "pv1",
+    "carrier": "rooftop pv",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "pvRoof",
+   "frontend": "pvRoof"
+  },
+  {
+   "why": "a PV field",
+   "cls": "Generator",
+   "row": {
+    "name": "pv2",
+    "carrier": "solar",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "pv",
+   "frontend": "pv"
+  },
+  {
+   "why": "an engine genset",
+   "cls": "Generator",
+   "row": {
+    "name": "g",
+    "carrier": "diesel",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "thermal",
+   "frontend": "thermal"
+  },
+  {
+   "why": "a generator of an unknown carrier falls back",
+   "cls": "Generator",
+   "row": {
+    "name": "x",
+    "carrier": "mystery",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "thermal",
+   "frontend": "thermal"
+  },
+  {
+   "why": "a battery store",
+   "cls": "Store",
+   "row": {
+    "name": "b",
+    "carrier": "battery",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "bess",
+   "frontend": "bess"
+  },
+  {
+   "why": "a store of another carrier",
+   "cls": "Store",
+   "row": {
+    "name": "s",
+    "carrier": "water",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "store",
+   "frontend": "store"
+  },
+  {
+   "why": "a storage unit",
+   "cls": "StorageUnit",
+   "row": {
+    "name": "su",
+    "carrier": "li-ion",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "bess",
+   "frontend": "bess"
+  },
+  {
+   "why": "an electrolyser seen from both sides",
+   "cls": "Link",
+   "row": {
+    "name": "el",
+    "carrier": "h2",
+    "bus0": "B1",
+    "bus1": "H"
+   },
+   "members": [
+    "B1",
+    "H"
+   ],
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "electrolyser",
+   "frontend": "electrolyser"
+  },
+  {
+   "why": "an electrolyser seen only from its H2 side: the port rule splits them",
+   "cls": "Link",
+   "row": {
+    "name": "el",
+    "carrier": "h2",
+    "bus0": "B1",
+    "bus1": "H"
+   },
+   "members": [
+    "H"
+   ],
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "electrolyser",
+   "frontend": "feeder"
+  },
+  {
+   "why": "a three-port link",
+   "cls": "Link",
+   "row": {
+    "name": "chp",
+    "carrier": "chp",
+    "bus0": "G",
+    "bus1": "B1",
+    "bus2": "HT"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "chp",
+   "frontend": "chp"
+  },
+  {
+   "why": "a load",
+   "cls": "Load",
+   "row": {
+    "name": "l",
+    "carrier": "",
+    "bus": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "load",
+   "frontend": "load"
+  },
+  {
+   "why": "a line",
+   "cls": "Line",
+   "row": {
+    "name": "ln",
+    "bus0": "B1",
+    "bus1": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "feeder",
+   "frontend": "feeder"
+  },
+  {
+   "why": "a transformer",
+   "cls": "Transformer",
+   "row": {
+    "name": "t",
+    "bus0": "B1",
+    "bus1": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "transformer",
+   "frontend": "transformer"
+  },
+  {
+   "why": "an AC bus",
+   "cls": "Bus",
+   "row": {
+    "name": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "switchyard",
+   "frontend": "switchyard"
+  },
+  {
+   "why": "a hydrogen bus",
+   "cls": "Bus",
+   "row": {
+    "name": "H"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2",
+    "HT": "heat",
+    "G": "gas"
+   },
+   "backend": "manifold",
+   "frontend": "manifold"
+  },
+  {
+   "why": "a gas link with no bus2 is not a CHP",
+   "cls": "Link",
+   "row": {
+    "name": "c",
+    "carrier": "gas",
+    "bus0": "B1",
+    "bus1": "B1"
+   },
+   "buses": {
+    "B1": "AC"
+   },
+   "backend": "feeder",
+   "frontend": "feeder"
+  },
+  {
+   "why": "a gas link with a bus2 is a CHP",
+   "cls": "Link",
+   "row": {
+    "name": "c",
+    "carrier": "gas",
+    "bus0": "B1",
+    "bus1": "B1",
+    "bus2": "B1"
+   },
+   "buses": {
+    "B1": "AC"
+   },
+   "backend": "chp",
+   "frontend": "chp"
+  },
+  {
+   "why": "an H2 link between two power buses is neither electrolyser nor fuel cell",
+   "cls": "Link",
+   "row": {
+    "name": "x",
+    "carrier": "h2",
+    "bus0": "B1",
+    "bus1": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2"
+   },
+   "backend": "feeder",
+   "frontend": "feeder"
+  },
+  {
+   "why": "an H2 link with no far bus is not an electrolyser",
+   "cls": "Link",
+   "row": {
+    "name": "x",
+    "carrier": "h2",
+    "bus0": "B1"
+   },
+   "buses": {
+    "B1": "AC",
+    "H": "H2"
+   },
+   "backend": "feeder",
+   "frontend": "feeder"
+  }
+ ]
+}

@@ -324,6 +324,7 @@ export interface CampusResults {
   reported_requirements?: ReportedRequirement[]
   /** The harmonic impedance scan from the PCC (DC-SURFACE-1); null for a run from before it was a stage. */
   harmonic_scan?: HarmonicScan | null
+  harmonic_emission?: HarmonicEmission | null
   /** Grid-to-process 12b: dips to trips to lost tonnes, and the restart sequence; null for a run from before. */
   dips_restart?: DipsRestart | null
   /** Each IBR unit against the per-unit Q curve (DC 15); null when the grid code has no curve. */
@@ -449,6 +450,42 @@ export type HarmonicScan =
   | { error: string }
   | { error?: undefined; limit_h: number; limit_source: LimitSource | null; clause: string | null; notes: string[]
       basis: string[]; label: string; resonance: HarmonicResonance[]; envelope: HarmonicEnvelopePoint[] }
+
+/** One row of `campus_harmonics.csv` (gridspine `campus_study.harmonics_campus`): `poc` rows (the campus PCC,
+ *  and a "with background" one when a measurement was used) and `unit` rows per harmonic source. */
+export interface HarmonicEmissionRow {
+  level: 'poc' | 'unit'
+  poc?: string | null
+  unit?: string | null
+  label?: string | null
+  u_h_pct?: Record<string, number> | string | null
+  thd_pct?: number | null
+  thd_limit_pct?: number | null
+  worst_order?: number | null
+  worst_u_h_pct?: number | null
+  worst_limit_pct?: number | null
+  failing_orders?: string | number | null
+  verdict?: 'pass' | 'fail' | 'unknown' | null
+  note?: string | null
+  assumed?: boolean | null
+}
+
+/** What the run took for the background harmonics at the PCC. */
+export type HarmonicBackground =
+  | { status: 'none' }
+  | { status: 'used'; citation: string }
+  | { status: 'unusable'; reason: string }
+
+/** The emission screen, or `{error}` when it could not run. */
+export type HarmonicEmission =
+  | { error: string }
+  | { error?: undefined; background: HarmonicBackground; label: string; rows: HarmonicEmissionRow[] }
+
+/** GET `.../background-harmonics`: the stored field measurement at the PCC. */
+export type BackgroundHarmonics =
+  | { has_background: false }
+  | { has_background: true; source: string; measured_on: string; filename: string | null; orders: number
+      poc: string; uploaded_at: string; in_latest_run: boolean }
 
 /** The restart, ride-through and motor fields of a process unit, as the run read them. */
 export type DipsRestartField = 'ride_through_curve' | 'restart_time_h' | 'motor_kw' | 'start_method' | 'i_start_pu'
@@ -1317,6 +1354,22 @@ export const campusApi = {
   /** Delete the project's copy; the shipped default is used again. */
   resetLibrary: (project: string) =>
     client.post<AssetLibrary>(`${base(project)}/library/reset`, undefined, quiet).then(r => r.data),
+
+  /** The stored measurement of the background harmonics at the PCC. */
+  backgroundHarmonics: (project: string) =>
+    client.get<BackgroundHarmonics>(`${base(project)}/background-harmonics`, quiet).then(r => r.data),
+
+  /** Multipart `file`, `source`, `measured_on` (YYYY-MM-DD). 413 too large; 422 names the `field`. */
+  putBackgroundHarmonics: (project: string, file: File, source: string, measuredOn: string) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('source', source)
+    fd.append('measured_on', measuredOn)
+    return client.put<BackgroundHarmonics>(`${base(project)}/background-harmonics`, fd, quiet).then(r => r.data)
+  },
+
+  deleteBackgroundHarmonics: (project: string) =>
+    client.delete<BackgroundHarmonics>(`${base(project)}/background-harmonics`, quiet).then(r => r.data),
 
   // grid codes: one thunk per route
   gridCodes: (project: string) =>

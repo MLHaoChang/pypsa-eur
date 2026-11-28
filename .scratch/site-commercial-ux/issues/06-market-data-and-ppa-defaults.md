@@ -3,9 +3,9 @@
 
 # 06 No market data: historical prices, PPA defaults per contract form and market bundles are unbuilt (S1, S2, K8)
 
-Status: ready-for-agent; audit 2026-11-25: S1 (#1850, #1851, #1865), S2a (#1852), S2b (#1880) and K8 (#1923, #1932, #1938) merged; left: the live E2E-DONE-1 for S1, blocked on the owner adding ENTSOE_API_TOKEN
+Status: ready-for-human; audit 2026-11-28: S1, S2a, S2b and K8 merged; left: the live E2E-DONE-1 for S1, which needs the owner to add `ENTSOE_API_TOKEN` (ENTSOE-TOKEN-1)
 Owner: SCU06-PLAN-1.
-Blocked by: none for S1/S2; K8 needs its own gated plan (with DC-06, one reserve model)
+Blocked by: the owner adding `ENTSOE_API_TOKEN` as an environment secret (S1 live check only); K8 is done, no gated plan is left
 Design: `.scratch/project-workflow/integration-sensitivities.md` §1, §2 and §6; commercial-finance.md §7 row K8 (Q8 = A).
 Source: gap review 2026-11-21, design map.
 Model: opus. Review: GK A/B + UX.
@@ -103,3 +103,7 @@ S2a ships the PPA/CfD defaults as five `common` Library contract items (`eu-ppa-
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: checked the cited PRs against the master merge log and market_prices.py, DayAheadPrices.tsx and the common PPA items; the live ENTSO-E probe and E2E need the owner token, so they stay open.
+
+## Audit (2026-11-28)
+
+- 2026-11-28 audit: no new PR since 2026-11-25. K8 (#1923, #1932, #1938) is merged, so the line 'K8 needs its own gated plan' is stale. The only open item is the live ENTSO-E probe and E2E for S1. No code is left. Question for the owner: has the token been added? If yes, a sonnet session runs the live check; if no, this stays blocked.

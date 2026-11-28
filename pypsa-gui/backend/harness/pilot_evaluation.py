@@ -282,6 +282,35 @@ GOLDEN_CASES = tuple(case for case in CASES if case.fault == "golden")
 MANIFEST_SHA256 = hashlib.sha256(json.dumps([asdict(case) for case in CASES], sort_keys=True).encode()).hexdigest()
 
 
+_FENCED = re.compile(r"```.*?(?:```|$)", re.S)
+_BACKTICKED = re.compile(r"`[^`\n]*`")
+
+
+def _snake_model_names() -> tuple[str, ...]:
+    """Every snake_case catalogue model name (the raw-name guard's whole-word rule, RAW-NAMES-1)."""
+    from services.asset_schema.catalogue import entries
+
+    return tuple(sorted({e.model_name for e in entries() if "_" in e.model_name}, key=lambda n: (-len(n), n)))
+
+
+def raw_model_names(text: str) -> list[str]:
+    """The model names a reply shows the user as written: whole snake_case words outside code.
+
+    `score` lists them as `raw_names`; `report` counts them per mode and fails a
+    live (model-written) reply that has one. The deterministic suite's checked
+    answers still carry some in their method notes (expert-catalogue issue 12),
+    so there they are counted, not failed.
+
+    A backticked name is not counted: the chat shows it as its plain name
+    (display replacement, spec expert-catalogue §7.3); fenced code is code."""
+    prose = _BACKTICKED.sub(" ", _FENCED.sub(" ", text))
+    names = _snake_model_names()
+    if not names:
+        return []
+    found = re.findall(r"(?<![A-Za-z0-9_])(" + "|".join(map(re.escape, names)) + r")(?![A-Za-z0-9_])", prose)
+    return sorted(set(found))
+
+
 def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     """Score the public result independently; never trust a passed verdict alone."""
     failures = set()
@@ -367,6 +396,7 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
     complete = receipt.get("request_complete") is True
     if complete != case.valid or approved.get("verdict") != ("passed" if case.valid else "limited"):
         failures.add("verdict_or_completeness")
+    raw_names = raw_model_names(text)
     false_accept = not case.valid and (complete or bool(answered & set(case.unavailable)) or bool(incorrect))
     false_reject = case.valid and (not complete or fulfilled != len(case.expected))
     return {
@@ -377,6 +407,7 @@ def score(case: Case, frames: list, answer: dict, *, project_id=None) -> dict:
         "fulfilled_slots": int(fulfilled), "expected_slots": len(case.expected),
         "unavailable_slots": sum(slot.get("disposition") != "answered" for slot in slots),
         "required_slots": len(required), "unchecked_publication": bool(unsafe),
+        "raw_names": raw_names,
     }
 
 
@@ -410,10 +441,12 @@ def report(results, *, live=False, execution_failed=False, expanded=False):
             "fulfillment": rate(sum(r["fulfilled_slots"] for r in scored), sum(r["expected_slots"] for r in scored)),
             "abstention": rate(sum(r["unavailable_slots"] for r in scored), sum(r["required_slots"] for r in scored)),
             "unchecked_publication": rate(sum(r["unchecked_publication"] for r in scored), len(scored)),
+            "raw_model_names": rate(sum(bool(r.get("raw_names")) for r in scored), len(scored)),
         }
     passed = bool(results) and not (missing or duplicate or unexpected or execution_failed) and all(
         result.get("execution") == "passed" and not result.get("failures")
         and not any(result.get(key) for key in ("false_accept", "false_reject", "incorrect_calculations", "unchecked_publication"))
+        and not (result.get("mode") == "live" and result.get("raw_names"))
         and result.get("fulfilled_slots") == result.get("expected_slots") for result in results
     )
     return {"version": 1, "suite": suite, "oracle": oracle,

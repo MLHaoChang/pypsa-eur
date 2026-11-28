@@ -55,6 +55,7 @@ import IntentComparisonSection from './IntentComparisonSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusDipsRestartSection from './CampusDipsRestartSection'
 import CampusHarmonicScanSection from './CampusHarmonicScanSection'
+import CampusHarmonicEmissionSection from './CampusHarmonicEmissionSection'
 import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY, openCampusFile } from './CampusIslandSection'
@@ -984,6 +985,8 @@ function ResultsSection({ state, pending, name, show = 'all' }: { state: CampusS
       {grid && <CampusUnitQCurveSection rows={r.ibr_q_curve} notComputed={r.ibr_q_curve_not_computed} />}
 
       {grid && <CampusHarmonicScanSection scan={r.harmonic_scan} />}
+
+      {grid && <CampusHarmonicEmissionSection emission={r.harmonic_emission} />}
 
       {grid && <CampusDipsRestartSection dips={r.dips_restart} />}
 
