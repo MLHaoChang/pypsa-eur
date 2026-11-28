@@ -476,3 +476,67 @@ def test_bridge_output_routes_refuse_unknown_other_owner_and_other_project_alike
         assert unknown == other_owner == other_project, name
     # Nothing was claimed or cancelled by any refused call.
     assert [o['state'] for o in ls._OUTPUTS[sid]] == ['queued']
+
+
+# ── spoken with the plain names the chat shows (expert-catalogue 05 part B) ──
+
+def _plain_spoken(monkeypatch, answer, *, said='what is the battery size'):
+    return _spoken_turn(monkeypatch, frames=_checked_frames(answer), approved=answer,
+                        text=said)
+
+
+def test_backticked_model_names_are_spoken_as_plain_names_but_the_caption_stays_raw(
+    transport, monkeypatch,
+):
+    raw = 'Set `e_nom` to 200 MWh.'
+    plain = 'Set Energy capacity to 200 MWh.'
+    tid, sid, token, episode, frames = _plain_spoken(monkeypatch, raw)
+    assert _caption(frames) == raw  # the transcript the client stores is untouched
+    output = ls.claim_output(tid, token=token, session_id=sid)['output']
+    assert output['text'] == plain
+    # Every consumer of the spoken record keys on the replaced text, never the raw one.
+    assert output['sha256'] == hashlib.sha256(plain.encode('utf-8')).hexdigest()
+    assert output['sha256'] != hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    assert output['chars'] == len(plain)
+    assert asyncio.run(_synth_input(output)) == plain
+
+
+def test_a_model_name_the_user_said_is_spoken_as_said(transport, monkeypatch):
+    tid, sid, token, _, _ = _plain_spoken(
+        monkeypatch, '`e_nom` is the size; `s_nom` the rating.', said='what is e_nom?',
+    )
+    output = ls.claim_output(tid, token=token, session_id=sid)['output']
+    assert output['text'] == '`e_nom` is the size; Rating the rating.'
+
+
+def test_the_tts_limit_is_checked_on_the_replaced_text(transport, monkeypatch):
+    limit = live_media.MAX_TTS_TEXT_CHARS
+    # "`e_nom`" (7 chars) is spoken as "Energy capacity" (15): +8 characters.
+    fits = 'a' * (limit - 16) + ' `e_nom`'
+    assert len(fits) + 8 == limit
+    tid, sid, token, _, _ = _plain_spoken(monkeypatch, fits)
+    assert ls.claim_output(tid, token=token, session_id=sid)['output']['chars'] == limit
+    # Within the limit as written, over it once spoken: refused, by design.
+    over = 'a' * (limit - 15) + ' `e_nom`'
+    assert len(over) < limit < len(over) + 8
+    tid, sid, token, _, _ = _plain_spoken(monkeypatch, over)
+    assert ls.claim_output(tid, token=token, session_id=sid) == {'status': 'empty'}
+
+
+async def _synth_input(output):
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, content=b'RIFF', headers={'content-type': 'audio/wav'})
+
+    profile = live_media.SpeechProfile(
+        name='fake', stt_endpoint='https://stt.invalid', stt_model='m',
+        tts_endpoint='https://tts.invalid', tts_model='m', tts_voice='v',
+    )
+    tts = live_media.HttpTtsAdapter(
+        profile, credential=lambda: 'k',
+        client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    await ls.synthesize_output(tts, output, language='en')
+    return sent[0]['input']

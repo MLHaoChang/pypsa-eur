@@ -51,6 +51,11 @@
    "why": "only single-backtick spans holding exactly one name",
    "text": "``e_nom`` and ` s_nom ` and `e_nom = 2` stay.",
    "want": "``e_nom`` and ` s_nom ` and `e_nom = 2` stay."
+  },
+  {
+   "why": "a component id that looks like snake_case is not a model name and stays raw",
+   "text": "Rename the generator `wind_farm` and the bus `grid_bus_1`.",
+   "want": "Rename the generator `wind_farm` and the bus `grid_bus_1`."
   }
  ]
 }
