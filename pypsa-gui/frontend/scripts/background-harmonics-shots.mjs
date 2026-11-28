@@ -12,7 +12,7 @@
  * Files: gc29b-<mode>-<theme>-<state>.png; input row states `row-empty`, `row-stored`, `row-stale`,
  * `row-error`, `row-remove`; Results states `res-none`, `res-used`, `res-unused`, `res-notcomputed`, `res-error`.
  *
- * Usage: node scripts/background-harmonics-shots.mjs [outDir]      env: BASE
+ * Usage: node scripts/background-harmonics-shots.mjs [outDir]      env: BASE, MODES (guided,expert)
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -29,14 +29,14 @@ const TEMPLATE = 'eh_concentrator_staged'
 const STATE = JSON.parse(await fs.readFile(path.join(here, 'dips-restart-shots.state.json'), 'utf8'))
 
 const STORED = { has_background: true, source: 'Grid operator measurement campaign', measured_on: '2026-10-03',
-  filename: 'pcc_background.csv', orders: 12, poc: 'PCC', uploaded_at: '2026-11-20T09:14:00Z', in_latest_run: true }
+  filename: 'pcc_background.csv', orders: 12, poc: 'grid', uploaded_at: '2026-11-20T09:14:00Z', in_latest_run: true }
 const BASIS = 'screening estimate: harmonic current sources at the PCC against the grid code voltage-distortion limits; the binding answer is a harmonic study'
 const rows = [
   { level: 'unit', unit: 'mill_1', thd_pct: 1.84, thd_limit_pct: 3, worst_order: 5, worst_u_h_pct: 1.2, worst_limit_pct: 2, verdict: 'pass' },
   { level: 'unit', unit: 'crusher', thd_pct: 3.6, thd_limit_pct: 3, worst_order: 7, worst_u_h_pct: 2.4, worst_limit_pct: 2, verdict: 'fail' },
   { level: 'unit', unit: 'flotation', thd_pct: null, thd_limit_pct: 3, worst_order: null, worst_u_h_pct: null, worst_limit_pct: null,
     verdict: 'unknown', note: 'no harmonic current spectrum set for this unit' },
-  { level: 'poc', poc: 'PCC', label: 'Point of common coupling', thd_pct: 2.9, thd_limit_pct: 3, worst_order: 5, worst_u_h_pct: 1.9, worst_limit_pct: 2, verdict: 'pass' },
+  { level: 'poc', poc: 'grid', label: 'Point of common coupling', thd_pct: 2.9, thd_limit_pct: 3, worst_order: 5, worst_u_h_pct: 1.9, worst_limit_pct: 2, verdict: 'pass' },
 ]
 const emission = background => ({ background, label: BASIS, rows })
 const RES = {
@@ -89,7 +89,7 @@ try {
   const auth = await owner.storageState()
   await owner.close()
 
-  for (const mode of ['guided', 'expert']) for (const theme of ['light', 'dark']) {
+  for (const mode of (process.env.MODES || 'guided,expert').split(',')) for (const theme of ['light', 'dark']) {
     const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
     await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
     await ctx.addInitScript(({ mode, project, theme }) => {
@@ -146,11 +146,18 @@ try {
     const reload = async () => { await page.reload(); await page.waitForLoadState('networkidle'); await page.getByText(PROJECT).first().waitFor(); await page.waitForTimeout(2500) }
     const rowLoc = () => page.getByTestId('connection-limit-background_harmonics')
 
-    for (const [key, def] of Object.entries(ROWS)) {
+    // Guided shows no input row: its Site card's connection section is the Grid readiness scorecard, and
+    // ConnectionLimits renders only in Expert's campus electrical panel (the Guided field drawer passes
+    // `only`, which hides the row). So Guided has the Results shots alone.
+    for (const [key, def] of Object.entries(mode === 'guided' ? {} : ROWS)) {
       await step(`row-${key}`, async () => {
         rowNow = def; emissionNow = RES.used
         await reload()
-        await page.evaluate(async () => { const { showGridReadiness } = await import('/src/layout/flowNavigation.ts'); showGridReadiness() })
+        // Guided: the Site card's connection section; Expert: Connection & grid's campus electrical panel.
+        await page.evaluate(async mode => {
+          const nav = await import('/src/layout/flowNavigation.ts')
+          if (mode === 'guided') nav.showGridReadiness(); else nav.openFlowTarget(nav.FAULT_LEVEL_TARGET)
+        }, mode)
         await rowLoc().waitFor(); await page.waitForTimeout(800)
         if (def.putError) {
           await page.locator('#bg-source').fill('Grid operator')
