@@ -6,6 +6,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { ResultsFilterProvider } from './filterContext'
+import { useResultsOutOfDateFlag } from '../../store/resultsOutOfDate'
+import { OUT_OF_DATE_TEXT } from '../../components/ResultsOutOfDate'
+import { nk } from '../../utils/queryKeys'
 import type { FlowScopeRegistry } from '../../api/flow'
 
 const flowApi = vi.hoisted(() => ({ getFlowScope: vi.fn(), getProjectFlow: vi.fn() }))
@@ -59,8 +62,10 @@ function renderTab(onOpenTab = vi.fn(), period: number | null = null) {
       </ResultsFilterProvider>
     </QueryClientProvider>,
   )
+  renderedClient = qc
   return onOpenTab
 }
+let renderedClient: QueryClient
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
@@ -364,6 +369,31 @@ describe('SummaryTab source run (control-strategy 06)', () => {
       .toBe('The reliability study has not run·Reliability goal ›'))
     expect(screen.getByTestId('summary-source-from').textContent).toMatch(/^From the dispatch solve, 2026-11-1[78] \d\d:\d\d$/)
     expect(screen.queryByTestId('summary-source-stale')).toBeNull()
+  })
+
+  // Issue 18 (UX 34 item 2 on #2140): after an edit every results route answers "out of date" (no body), and
+  // when a solve ends they come back one by one. A part still empty while the results are out of date says
+  // so, never "No … for this solve".
+  it('an out-of-date result with only some parts back says out of date, never "No … for this solve"', async () => {
+    api.getCostBreakdown.mockResolvedValue(null)
+    api.getStatistics.mockResolvedValue(null)
+    api.getStatus.mockResolvedValue({ status: 'completed', condition: 'optimal', objective: 1.2e7, solve_time: 3.4,
+      dispatch: 'stale', solved_at: null })
+    flow({ optimisation: 'stale', study: null, loadflow: 'not_run' })
+    useResultsOutOfDateFlag.setState({ project: 'Demo' })
+    renderTab()
+    const cost = await screen.findByTestId('summary-cost')
+    await waitFor(() => expect(cost.textContent).toContain(OUT_OF_DATE_TEXT))
+    expect(screen.getByTestId('summary-capacity').textContent).toContain(OUT_OF_DATE_TEXT)
+    expect(screen.queryByText(/No cost breakdown for this solve|No capacities for this solve/)).toBeNull()
+    useResultsOutOfDateFlag.setState({ project: null })
+  })
+
+  it('a solve\'s end refreshes the capacities with the other results (one results root)', async () => {
+    renderTab()
+    await waitFor(() => expect(api.getStatistics).toHaveBeenCalledTimes(1))
+    await renderedClient.invalidateQueries({ queryKey: nk('Demo', 'results') })
+    await waitFor(() => expect(api.getStatistics).toHaveBeenCalledTimes(2))
   })
 
   it('a solve older than the inputs is marked out of date (GK B3 C2)', async () => {

@@ -4,7 +4,7 @@
 // query keys so the cache is shared, and a link into its tab. Absent is never
 // shown as zero: a quantity the solve did not model says so, and a standard
 // that was not set is not shown as met.
-import ResultsOutOfDate from '../../components/ResultsOutOfDate'
+import ResultsOutOfDate, { OUT_OF_DATE_TEXT } from '../../components/ResultsOutOfDate'
 import { useResultsOutOfDate } from '../../hooks/useResultsOutOfDate'
 import { showGridReadiness } from '../../layout/flowNavigation'
 import type { ReactNode } from 'react'
@@ -144,7 +144,8 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   // The grid supply's connection, which Key capacities names in place of the supply's placeholder size.
   const { flow, section: flowSection } = useProjectFlow()
   const gridNote = gridSupplyWords(flowSection('connection'))
-  const { data: stats } = useQuery({ queryKey: nk(project, 'results_statistics'), queryFn: resultsApi.getStatistics })
+  // Under the results root, so a solve's end refreshes it with the other results (issue 18, UX 34 item 2).
+  const { data: stats } = useQuery({ queryKey: nk(project, 'results', 'statistics'), queryFn: resultsApi.getStatistics })
 
   // A figure the headline strip shows is not repeated as a card headline below
   // (one figure, one place). A card narrowed to one period keeps its own.
@@ -292,7 +293,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
                 </span>
               )}
             </>
-          ) : <Absent>No cost breakdown for this solve.</Absent>}
+          ) : <Absent>{resultsOutOfDate ? OUT_OF_DATE_TEXT : 'No cost breakdown for this solve.'}</Absent>}
         </Card>
 
         <Card title="Emissions" testId="summary-emissions" link="emissions" linkLabel="Emissions" onOpen={onOpenTab}
@@ -358,7 +359,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
                 ))}
               </tbody>
             </table>
-          ) : <Absent>No capacities for this solve.</Absent>}
+          ) : <Absent>{resultsOutOfDate ? OUT_OF_DATE_TEXT : 'No capacities for this solve.'}</Absent>}
           {caps.length > MAX_CAPACITY_ROWS && (
             <p className="text-[10px] text-muted">and {caps.length - MAX_CAPACITY_ROWS} more</p>
           )}

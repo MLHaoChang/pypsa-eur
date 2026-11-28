@@ -35,7 +35,7 @@ function NoData() {
 // ── Summary tab ───────────────────────────────────────────────────────────────
 function SummaryTab() {
   const currentProject = useUIStore(s => s.currentProject)
-  const { data: stats } = useQuery({ queryKey: nk(currentProject, 'results_statistics'), queryFn: resultsApi.getStatistics })
+  const { data: stats } = useQuery({ queryKey: nk(currentProject, 'results', 'statistics'), queryFn: resultsApi.getStatistics })
 
   if (!stats) return <NoData />
 
