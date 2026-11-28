@@ -31,7 +31,7 @@ describe('ReliabilityGoalSummary: an assumed goal (walkthrough asset-investment 
 
   it('names the site type by its short word, with no second colon', () => {
     state.goal = goal({ site_archetype: ['off_grid', 'stored'] })
-    render(<ReliabilityGoalSummary items={['site_archetype']} testId="g" />)
+    render(<ReliabilityGoalSummary items={['site']} testId="g" />)
     const t = screen.getByTestId('g-values').textContent ?? ''
     expect(t).toContain('grid connection: none, an island')
     expect(t.match(/:/g)).toHaveLength(1)
