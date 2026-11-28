@@ -1,5 +1,5 @@
-Status: ready-for-agent
-Progress: S1 merged (#2065), S2 merged (#2084), S3a merged (#2086). Plan GO (GK B 74, option a): S3 split into S3a LV08 B-campus (24 tools, stem lv08_bcampus, #2086) and S3b campus-electrical core (18 tools, stem campus_electrical, this PR); then S4 Adequacy/FMEA, S5 Asset results + UI control + Explanation, then stop.
+Status: done (#2109; overlap_tests.py mapping of the registry bases stays with RETRO-PAR-1, follow-up in 03-tool-fragments-follow-up.md)
+Progress: S1 merged (#2065), S2 merged (#2084), S3a LV08 B-campus merged (#2086), S3b campus-electrical core merged (#2096), S4 adequacy studies merged (#2106), S5 explanation + UI control + asset results (#2109). Plan GO (GK B 74, option a; S4 and S5 plans GO from GK B 75). Done: the tools that cannot splice without changing the registry digest, and the gaps found on the way, are in 03-tool-fragments-follow-up.md.
 
 # Per-tool registry for the chat catalogue
 

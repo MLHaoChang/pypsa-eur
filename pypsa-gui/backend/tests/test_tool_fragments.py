@@ -70,6 +70,9 @@ def test_report_templates_is_a_fragment_spliced_at_its_old_place():
         "lv08_bcampus",
         "campus_electrical",
         "adequacy_studies",
+        "explanation",
+        "ui_control",
+        "asset_results",
     }
 
 
@@ -299,6 +302,21 @@ SPLICED_PLACES = {
         "TOOLS": ("get_eh_template", "solve_queue_enqueue"),
         "TOOL_ROUTES": ("get_eh_template", "solve_queue_enqueue"),
         "DISPATCHERS": ("get_reliability_goal", "solve_queue_enqueue"),
+    },
+    "explanation": {
+        "TOOLS": ("record_asset_health", "get_adequacy_results"),
+        "TOOL_ROUTES": ("record_asset_health", "get_adequacy_results"),
+        "DISPATCHERS": ("get_aggregate_load", "create_component"),
+    },
+    "ui_control": {
+        "TOOLS": ("undo_status", "compare_scenarios"),
+        "TOOL_ROUTES": ("undo_status", "ui_set_snapshot"),
+        "DISPATCHERS": ("undo_status", "ui_set_snapshot"),
+    },
+    "asset_results": {
+        "TOOLS": ("set_active_profile", "gridspine_create_study"),
+        "TOOL_ROUTES": ("clear_uploads", "export_results_workbook"),
+        "DISPATCHERS": ("clear_uploads", "export_results_workbook"),
     },
 }
 
@@ -574,6 +592,87 @@ def test_the_campaign_writes_stay_lock_gated_and_non_network():
     assert "campaign_status" not in chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS
 
 
+# Every inlined enum of the S5 schema fragments, by stem (catalogue keeps its own).
+S5_CONSTANTS = {
+    "explanation": ["INVESTMENT_CLASS_ENUM"],
+    "ui_control": [
+        "COMPONENT_CLASS_ENUM",
+        "GUIDED_STEP_ENUM",
+        "PANEL_SECTION_ENUM",
+        "SAFETY_PANEL_ENUM",
+        "RESULTS_TAB_ENUM",
+        "BOTTOM_TAB_ENUM",
+        "COMPARE_TAB_ENUM",
+    ],
+    "asset_results": [
+        "ASSET_CATEGORY_ENUM",
+        "ASSET_VIEW_MODE_ENUM",
+        "ASSET_RESOLUTION_ENUM",
+        "RESULTS_SOURCE_ENUM",
+        "COMPONENT_CLASS_ENUM",
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    "stem,name", [(s, n) for s, names in S5_CONSTANTS.items() for n in names]
+)
+def test_s5_constants_equal_catalogues(stem, name):
+    mod = F.discover(F.SCHEMA_PACKAGE)[stem]
+    assert getattr(mod, name) == getattr(catalogue, name)
+
+
+def test_s5_constants_are_every_upper_case_name_of_the_fragment():
+    for stem, names in S5_CONSTANTS.items():
+        mod = F.discover(F.SCHEMA_PACKAGE)[stem]
+        own = {
+            n
+            for n in vars(mod)
+            if n.isupper() and not n.startswith("_") and n not in {"TOOLS", "ROUTES"}
+        }
+        assert own - {"NON_NETWORK_WRITES"} == set(names), stem
+
+
+# Helpers and tables only their family uses, moved with it; chat_tools
+# re-exports each, so both names are one object.
+MOVED_HELPERS = {
+    "explanation": ["_explain_kpis"],
+    "ui_control": [
+        "_PANEL_SECTIONS",
+        "_PANEL_SECTION_ORDER",
+        "_loadflow_navigation_args",
+    ],
+    "asset_results": ["_series_stats"],
+}
+
+
+@pytest.mark.parametrize(
+    "stem,name", [(s, n) for s, names in MOVED_HELPERS.items() for n in names]
+)
+def test_a_moved_helper_is_the_chat_tools_object(stem, name):
+    from services import chat_tools
+
+    mod = F.discover(F.DISPATCH_PACKAGE)[stem]
+    assert getattr(chat_tools, name) is getattr(mod, name)
+
+
+def test_export_asset_results_stays_a_non_network_write():
+    from harness.catalogue_tools import asset_results
+
+    assert asset_results.NON_NETWORK_WRITES == {"export_asset_results"}
+    assert "export_asset_results" in catalogue._SERVICE_CALL_NON_NETWORK_WRITES
+    assert "get_asset_results" not in catalogue._SERVICE_CALL_NON_NETWORK_WRITES
+
+
+def test_the_crud_attrs_table_is_read_from_chat_tools_at_call_time(monkeypatch):
+    from services import chat_tools
+    from services.chat_dispatchers import ui_control
+
+    monkeypatch.setattr(chat_tools, "_GENERIC_CRUD_ATTRS", {"Probe": "probes"})
+    assert ui_control._GENERIC_CRUD_ATTRS["Probe"] == "probes"
+    assert "Bus" not in ui_control._GENERIC_CRUD_ATTRS
+
+
 def _proxies():
     """(fragment, name) for each dispatcher-fragment helper that reaches a
     chat_tools helper of the same name through ``_ct()``."""
@@ -639,6 +738,9 @@ PROXIES = {
         "get_adequacy_results",
         "get_asset_health",
     ],
+    "explanation": ["get_asset_results", "get_results"],
+    "ui_control": ["_acting"],
+    "asset_results": ["_save_agent_export"],
 }
 
 
@@ -654,6 +756,7 @@ def test_every_dispatcher_fragments_proxies_are_pinned():
             and isinstance(fn, types.FunctionType)
             and fn.__module__ == mod.__name__
             and name not in mod.DISPATCHERS
+            and name not in MOVED_HELPERS.get(stem, ())
         )
         for stem, mod in F.discover(F.DISPATCH_PACKAGE).items()
     }
@@ -675,7 +778,11 @@ def test_the_adequacy_tables_are_read_from_chat_tools_at_call_time(monkeypatch):
         for name, v in vars(mod).items()
         if type(v).__name__ == "_CtTable"
     }
-    assert views == {"_ADEQUACY_NO_DATA_HINTS", "_ADEQUACY_ABORT_HANDLER_NAMES"}
+    assert views == {
+        "_ADEQUACY_NO_DATA_HINTS",
+        "_ADEQUACY_ABORT_HANDLER_NAMES",
+        "_GENERIC_CRUD_ATTRS",
+    }
 
     monkeypatch.setattr(
         chat_tools, "_ADEQUACY_NO_DATA_HINTS", {"eh_reference_design": "patched"}
@@ -770,7 +877,15 @@ def _dispatcher_stems():
 
 def test_the_circular_import_cases_are_exactly_the_discovered_fragments():
     stems = _dispatcher_stems()
-    assert "report_templates" in stems
+    assert stems == [
+        "adequacy_studies",
+        "asset_results",
+        "campus_electrical",
+        "explanation",
+        "lv08_bcampus",
+        "report_templates",
+        "ui_control",
+    ]
     assert stems == sorted(F.discover(F.DISPATCH_PACKAGE))
 
 

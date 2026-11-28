@@ -64,7 +64,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
                                     "operating time the snapshots represent (Σ weights / 8760) "
                                     "— a unit, not a step (IC WP1.4a)"),
     "chat_tools.py": (2, "prose / output-budget guidance"),
-    "harness/catalogue.py": (3, "tool descriptions (row counts, default hours)"),
+    "harness/catalogue.py": (2, "tool descriptions (row counts, default hours)"),
+    # get_asset_results' description, moved out of catalogue.py (RETRO-FRAG-1 S5)
+    "harness/catalogue_tools/asset_results.py": (1, "tool descriptions (row counts, default hours)"),
     "harness/sensitivity_comparison.py": (1, "HOURS_PER_YEAR = 8760 h/yr annualises; not a snapshot step"),
     "harness/system_cost_calculations.py": (2, "nyears = Σ objective weights / 8760 (docstring, "
                                               "HOURS_PER_YEAR) scales annual costs; a unit, not a step"),
@@ -191,5 +193,5 @@ def test_the_inventory_is_pinned():
     # DC review 02: solver/co2_cap.py (3) annualises the CO2 limit's constant.
     # AA-10 R3: harness/system_cost_calculations.py (2) and harness/fact_identity.py (1), nyears.
     assert sum(c for c, _ in ALLOWED.values()) == 103
-    assert len(ALLOWED) == 54
+    assert len(ALLOWED) == 55
     assert all(reason for _, reason in ALLOWED.values())

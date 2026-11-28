@@ -1034,33 +1034,8 @@ TOOLS: list[dict[str, Any]] = [
 
     # ── Explanation / synthesis (1) ────────────────────────────────────────
 
-    _t(
-        "explain_investment",
-        "Why is this asset the size it is? Fuses, in ONE call, the evidence an "
-        "explanation needs: `sizing` (existing vs optimised capacity, the "
-        "bounds, and `binding_constraint` — one of not_solved / "
-        "not_extendable / at_upper_bound / at_lower_bound / not_built / "
-        "interior — with the sentence that says what that means), "
-        "`asset_kpis` (the registry's "
-        "cross-tab headline: capacity factor, capture price, revenue, net "
-        "profit, LCOE, CO2, read from the same source as the Asset Detail "
-        "tab), `system_signals` (marginal price at the asset's buses, active "
-        "CO2 caps with their shadow prices, and `congestion` — binding lines "
-        "at those buses PLUS a `note` saying what an empty list means: "
-        "nothing binds, no duals captured, or out of scope) and "
-        "`reading_notes`. START HERE for any 'why did the model build / not "
-        "build X' question: `binding_constraint` is usually the whole answer, "
-        "and an asset at a bound was NOT sized by its economics. Evidence "
-        "only — no verdict; narrate solely from fields present in the payload, "
-        "and obey reading_notes (an interior extendable asset earns ~zero net "
-        "profit by construction). Safety: read.",
-        {
-            "component_class": {"type": "string",
-                                "enum": INVESTMENT_CLASS_ENUM},
-            "name": {"type": "string"},
-        },
-        ["component_class", "name"],
-    ),
+    # ── Explanation: harness/catalogue_tools/explanation.py ──
+    *_FRAGMENTS.splice("explanation"),
 
     # ── Adequacy / solution-FMEA (9) ───────────────────────────────────────
 
@@ -2101,70 +2076,8 @@ TOOLS: list[dict[str, Any]] = [
 
     # ── UI control (3) ─────────────────────────────────────────────────────
 
-    _t(
-        "ui_select_component",
-        "Emit a typed SSE ui_event frame the ChatPanel forwards to "
-        "uiStore.setSelectedComponent, closing an open panel except Issues so Properties is visible. "
-        "With open_editor=true, opens the component's Edit form in Properties for the user to change and save; "
-        "nothing is saved by this tool. NO backend mutation. Safety: read.",
-        {
-            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
-            "name": {"type": "string"},
-            "open_editor": {"type": "boolean"},
-        },
-        ["component_class", "name"],
-    ),
-    _t(
-        "ui_open_panel",
-        "Navigate the GUI via SSE ui_event (kind=navigate). Opens a main "
-        "panel (Results / SolverSettings / TimeSeriesManager / Scenarios / "
-        "Issues / Chat / project_picker / new_project / …), optionally a "
-        "Results sub-tab (capex, dispatch, economics, …), a bottom asset "
-        "table tab (Buses, Generators, …), and/or the A|B compare rail with "
-        "scenario picks. Use project_picker when the user wants to browse "
-        "saved projects without naming one. hubDesign opens the step-by-step "
-        "Energy Hub design panel (Guided mode's main view). workspace, settings, "
-        "gridspine, reports and campusElectrical (the grid connection) open their application panels; campusStudy opens the grid study's settings and run, campusResults its results; economics opens the rates, "
-        "price basis and every asset's investment costs; "
-        "adequacy and fmea select their Results tabs. Use map with canvas_view hybrid "
-        "(satellite with labels) or site (the 3D site view). "
-        "With hubDesign, guided_step opens one Guided card (start, site, goal, results or improve). "
-        "With campusElectrical, campusStudy, campusResults or gridspine, panel_section scrolls to one "
-        "section of that panel (for example island, grid_codes, readback); a section the project does not "
-        "have yet leaves the panel at its top. "
-        "With results_tab loadflow, pass loadflow_source, window_from/window_to and "
-        "highlight_branch from get_loadflow_summary's ui_reference to open the same source and "
-        "window and highlight one line or transformer. Only when one of these is given, an "
-        "unavailable view or an unknown branch refuses with no navigation; the result's highlight "
-        "says whether the branch is ranked and shown. With panel_id scenarios, highlight_projects "
-        "(1–4 project ids, e.g. a sweep's new cases) highlights them in the scenario tree. Safety: read.",
-        {
-            "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
-            "canvas_view": {"type": "string", "enum": ["blank", "satellite", "hybrid", "site"]},
-            "guided_step": {"type": "string", "enum": GUIDED_STEP_ENUM},
-            "panel_section": {"type": "string", "enum": PANEL_SECTION_ENUM},
-            "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},
-            "bottom_tab": {"type": "string", "enum": BOTTOM_TAB_ENUM},
-            "compare_rail": {"type": "boolean"},
-            "compare_a": {"type": "string"},
-            "compare_b": {"type": "string"},
-            "compare_tab": {"type": "string", "enum": COMPARE_TAB_ENUM},
-            "loadflow_source": {"type": "string", "enum": ["lopf", "ac_pf"]},
-            "window_from": {"type": "integer", "minimum": 0},
-            "window_to": {"type": "integer", "minimum": 0},
-            "highlight_branch": {
-                "type": "object",
-                "properties": {
-                    "component": {"type": "string", "enum": ["Line", "Transformer"]},
-                    "name": {"type": "string", "minLength": 1, "maxLength": 128},
-                },
-                "required": ["component", "name"],
-                "additionalProperties": False,
-            },
-            "highlight_projects": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string"}},
-        },
-        ["panel_id"],
-    ),
+    # ── UI control: harness/catalogue_tools/ui_control.py ──
+    *_FRAGMENTS.splice("ui_control"),
     _t(
         "compare_scenarios",
         "Side-by-side comparison of two saved projects/scenarios. Returns "
@@ -2948,72 +2861,8 @@ TOOLS: list[dict[str, Any]] = [
     ),
 
     # ── Asset results (3) — Task 14 ─────────────────────────────────────────
-    _t(
-        "get_asset_results",
-        "Per-asset results for ONE component (e.g. Generator 'Gas 1'). "
-        "Returns {asset, category, categories[{id,status,reason}], scalars, "
-        "unavailable[{id,label,status,reason}], n_snapshots} plus, by default "
-        "(resolution='stats'), series_stats[metric] = {min,max,mean,sum,p50,"
-        "p95,peak_at,zero_count,sparkline} — a <=48-point downsample, NOT the "
-        "full series. Use this default for questions about totals, peaks, "
-        "timing and shape. resolution='raw' returns real arrays truncated to "
-        "max_rows (default 2000) with truncated + n_total set; an hourly year "
-        "is 8760 rows, so prefer export_asset_results when the user wants the "
-        "complete data rather than an answer. Metrics that do not apply come "
-        "back under `unavailable` with the reason, never as an error. "
-        "Safety: read.",
-        {
-            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
-            "name": {"type": "string"},
-            "category": {"type": "string", "enum": ASSET_CATEGORY_ENUM},
-            "metrics": {"type": "array", "items": {"type": "string"}},
-            "source": {"type": "string", "enum": RESULTS_SOURCE_ENUM},
-            "from_iso": {"type": "string"},
-            "to_iso": {"type": "string"},
-            "period": {"type": "string"},
-            "resolution": {"type": "string", "enum": ASSET_RESOLUTION_ENUM},
-            "max_rows": {"type": "integer"},
-        },
-        ["component_class", "name"],
-    ),
-    _t(
-        "ui_open_asset_detail",
-        "Open the Results > Asset Detail tab on one asset, optionally with a "
-        "category, a metric selection, a view mode and the chart toggle "
-        "pre-set. Emits a ui_event (kind=open_asset_detail); NO backend "
-        "mutation. Omitted arguments leave the panel's current state alone. "
-        "Safety: read.",
-        {
-            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
-            "name": {"type": "string"},
-            "category": {"type": "string", "enum": ASSET_CATEGORY_ENUM},
-            "metrics": {"type": "array", "items": {"type": "string"}},
-            "mode": {"type": "string", "enum": ASSET_VIEW_MODE_ENUM},
-            "chart": {"type": "boolean"},
-        },
-        ["component_class", "name"],
-    ),
-    _t(
-        "export_asset_results",
-        "Write one asset's results to an xlsx workbook in the project's "
-        "uploads/ (kind='agent_export'), so the chat panel shows a download "
-        "chip. scope='view' exports the named category and metrics; "
-        "scope='full' exports every applicable category with every available "
-        "metric. The workbook always opens with an About sheet carrying the "
-        "project, solve time, objective, result source, horizon, period and "
-        "view mode. Returns {filename, bytes, kind}. Safety: write.",
-        {
-            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
-            "name": {"type": "string"},
-            "scope": {"type": "string", "enum": ["view", "full"]},
-            "category": {"type": "string", "enum": ASSET_CATEGORY_ENUM},
-            "metrics": {"type": "array", "items": {"type": "string"}},
-            "filename": {"type": "string"},
-            "source": {"type": "string", "enum": RESULTS_SOURCE_ENUM},
-            "mode": {"type": "string", "enum": ASSET_VIEW_MODE_ENUM},
-        },
-        ["component_class", "name"],
-    ),
+    # ── Asset results: harness/catalogue_tools/asset_results.py ──
+    *_FRAGMENTS.splice("asset_results"),
 
     # ── gridspine: planning → dynamics studies (8) ─────────────────────────
     # Wrappers over services/gridspine_service.py — the SAME functions
@@ -4943,7 +4792,8 @@ TOOL_ROUTES: dict[str, list] = {
     "get_asset_health": [("GET", "/api/projects/{name}/asset_health")],
     "record_asset_health": [("PUT", "/api/projects/{name}/asset_health")],
     # synthesis (1) — composite in-process fusion, no HTTP route of its own
-    "explain_investment": _DERIVED,
+    # Explanation: harness/catalogue_tools/explanation.py
+    **_FRAGMENTS.splice_routes("explanation"),
     # adequacy_fmea (10) — + run_eh_study; get kinds include EH status/report
     "get_adequacy_results": [
         # 11 of 12 kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is
@@ -5039,8 +4889,8 @@ TOOL_ROUTES: dict[str, list] = {
     "undo_last": [("POST", "/api/network/undo")],
     "undo_status": [("GET", "/api/network/undo/info")],
     # ui_control (3)
-    "ui_select_component": _UI_EVENT,
-    "ui_open_panel": _UI_EVENT,
+    # UI control: harness/catalogue_tools/ui_control.py
+    **_FRAGMENTS.splice_routes("ui_control"),
     "ui_set_snapshot": _UI_EVENT,
     "ask_user": _UI_EVENT,
     "project_readiness": _SERVICE_CALL,
@@ -5116,9 +4966,8 @@ TOOL_ROUTES: dict[str, list] = {
     # mapping them to the real paths would fail
     # test_every_http_route_resolves_in_inventory until the fixture is
     # regenerated — out of scope for this task.
-    "get_asset_results": _SERVICE_CALL,
-    "ui_open_asset_detail": _UI_EVENT,
-    "export_asset_results": _SERVICE_CALL,
+    # Asset results: harness/catalogue_tools/asset_results.py
+    **_FRAGMENTS.splice_routes("asset_results"),
     "export_results_workbook": [("GET", "/api/results/workbook.xlsx")],
     # Task 10 — writes <app-data>/llm-profiles.json via services.llm_config,
     # not an HTTP route. The settings pane's own PUT /chat/settings/llm/active
@@ -5337,7 +5186,8 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment",
     "build_delivery", "export_run_evidence", "export_experiment_comparison", "export_sensitivity_comparison",
     "export_to_excel", "export_to_csv", "export_preview_png",
-    "export_chat_summary", "export_eh_report_docx", "export_asset_results",
+    "export_chat_summary", "export_eh_report_docx",
+    # export_asset_results: NON_NETWORK_WRITES in harness/catalogue_tools/asset_results.py
     "set_active_profile", "clear_uploads",
     # campaign start/end: NON_NETWORK_WRITES in harness/catalogue_tools/adequacy_studies.py
     # study-harness 23: a confirmed requirement goes on the durable thread.
