@@ -23,11 +23,11 @@ vi.mock('../hooks/useSolveQueue', () => ({
 let projectRun: RunView | null = null
 let hubStudy: EhStudyPayload | null = null
 vi.mock('../pages/hubDesign/useHubData', () => ({ useHubStudy: () => ({ study: hubStudy }) }))
-const verdict = vi.hoisted(() => ({ hasStudy: false, body: null as object | null, mutate: vi.fn() }))
+const verdict = vi.hoisted(() => ({ hasStudy: false, body: null as object | null, problem: null as string | null, mutate: vi.fn() }))
 vi.mock('../hooks/useVerdictStudyEntry', () => ({ useVerdictStudyEntry: () => ({ hasStudy: verdict.hasStudy }) }))
 vi.mock('../pages/hubDesign/useGoalStudy', () => ({
   useGoalStudy: () => ({
-    built: { body: verdict.body }, vollMissing: false, problem: null,
+    built: { body: verdict.body }, vollMissing: false, problem: verdict.problem,
     run: { mutate: verdict.mutate, isPending: false },
   }),
 }))
@@ -144,6 +144,19 @@ describe('one Run entry in Expert (template-e2e 17, TE2E-17-RUN-1)', () => {
     fireEvent.click(btn)
     await waitFor(() => expect(verdict.mutate).toHaveBeenCalledTimes(1), { timeout: 10000 })
     verdict.hasStudy = false; verdict.body = null
+  })
+
+  it('disables the header Run and names the reason while the study cannot start', async () => {
+    verdict.hasStudy = true; verdict.body = null; verdict.problem = 'No import connection set.'
+    verdict.mutate.mockClear()
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'p', readOnly: false } as never)
+    renderHeader()
+    expect((await screen.findByTestId('run-blocker', {}, { timeout: 10000 })).textContent).toBe('No import connection set.')
+    const btn = screen.getByRole('button', { name: /Run study/ }) as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    fireEvent.click(btn)
+    expect(verdict.mutate).not.toHaveBeenCalled()
+    verdict.hasStudy = false; verdict.problem = null
   })
 
   it('keeps the LOPF label where the project has no verdict study', async () => {

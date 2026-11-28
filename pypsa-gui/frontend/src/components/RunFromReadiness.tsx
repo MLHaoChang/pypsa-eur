@@ -9,7 +9,9 @@ import { useVerdictStudyEntry } from '../hooks/useVerdictStudyEntry'
  *  keeps the header's reason and the findings below. */
 export function RunFromReadiness({ testId = 'readiness-run' }: { testId?: string }) {
   // The same gate as the header Run it asks to start.
-  const gate = useRunGate(useVerdictStudyEntry().hasStudy && useUIStore(s => s.uiMode) === 'expert' ? 'all' : 'optimisation')
+  const { hasStudy } = useVerdictStudyEntry()
+  const uiMode = useUIStore(s => s.uiMode)
+  const gate = useRunGate(hasStudy && uiMode === 'expert' ? 'all' : 'optimisation')
   const requestRunSolve = useUIStore(s => s.requestRunSolve)
   if (gate.blocked || gate.checking) return null
   return (

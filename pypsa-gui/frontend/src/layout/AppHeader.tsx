@@ -897,10 +897,6 @@ export default function AppHeader() {
       return
     }
     if (verdictRun) {
-      if (goalStudy.built.body === null || goalStudy.vollMissing) {
-        toast.error(goalStudy.problem ?? 'The study cannot start yet.')
-        return
-      }
       goalStudy.run.mutate()
       return
     }
@@ -1153,15 +1149,21 @@ export default function AppHeader() {
         if ((isStudy || kindPending) && !amber) return null
         // Disabled exactly when the server would refuse (design §3.3), saying
         // why by section; display-only gaps ride beside an enabled Run.
-        const gated = runGate.blocked && !amber
+        // A study whose own inputs are not ready is blocked too, with its
+        // reason in the same place (as Guided's section 9 shows it).
+        const studyBlocked = verdictRun && (goalStudy.built.body === null || goalStudy.vollMissing)
+        const studyReason = goalStudy.problem
+          ?? (goalStudy.vollMissing ? 'Set the value of lost load (Solver settings) to run the study.' : 'The study inputs are still being read.')
+        const gated = (runGate.blocked || studyBlocked) && !amber
+        const gateReason = runGate.blocked ? runGate.reason : studyReason
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
         return (<>
           {gated && (
             <button type="button" data-testid="run-blocker"
-              onClick={() => runGate.blocker ? openFlowTarget(runGate.blocker.target) : openSectionInExpert('readiness')}
+              onClick={() => runGate.blocker && runGate.blocked ? openFlowTarget(runGate.blocker.target) : openSectionInExpert('readiness')}
               title="Show the field to fix"
               className="max-w-[18rem] truncate text-[11px] text-warn underline-offset-2 hover:underline">
-              {runGate.reason}
+              {gateReason}
             </button>
           )}
           {runGate.checking && !amber && (
@@ -1183,7 +1185,7 @@ export default function AppHeader() {
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'
               : gated
-              ? `Cannot run yet — ${runGate.reason}`
+              ? `Cannot run yet — ${gateReason}`
               : studyRunning && !jobRunning && !isRunning
               ? STUDY_ABORT_TITLE
               : jobRunning || isRunning
