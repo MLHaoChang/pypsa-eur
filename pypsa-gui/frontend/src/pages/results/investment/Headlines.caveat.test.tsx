@@ -26,14 +26,14 @@ afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('Investment LCOE (real) caveat', () => {
   it('sits under the LCOE (real) row when the headline card holds the same figure', async () => {
-    vi.spyOn(resultsApi, 'getHeadlineKpis').mockResolvedValue({ kind: 'energy_hub', cards: [card(413.2)] })
+    vi.spyOn(resultsApi, 'getHeadlineKpis').mockResolvedValue({ kind: 'energy_hub', cards: [card(413.2)], comparison: null })
     mount()
     const line = await screen.findByTestId('ic-headline-caveat-lcoe_real')
     expect(line.textContent).toBe(CAVEAT)
     expect(line.previousElementSibling?.getAttribute('data-testid')).toBe('ic-headline-lcoe_real')
   })
   it('stays off when the card holds another figure', async () => {
-    const spy = vi.spyOn(resultsApi, 'getHeadlineKpis').mockResolvedValue({ kind: 'energy_hub', cards: [card(500)] })
+    const spy = vi.spyOn(resultsApi, 'getHeadlineKpis').mockResolvedValue({ kind: 'energy_hub', cards: [card(500)], comparison: null })
     mount()
     await screen.findByTestId('ic-headline-lcoe_real')
     await vi.waitFor(() => expect(spy).toHaveBeenCalled())
