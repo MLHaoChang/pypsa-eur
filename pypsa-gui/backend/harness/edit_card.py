@@ -57,6 +57,8 @@ SETTINGS_EDITS = frozenset({
     "apply_commercial_document_values",
     # live-voice 08 B3: the weather source/year every profile generate takes
     "set_weather_choice",
+    # template-e2e 02: one period of the connection's energization schedule
+    "set_energization_period",
     # LV08 B1: a study's intake/settings and the project's scope, labels and settings.
     "update_decision_study", "update_project_flow_scope", "update_project_scenario_metadata",
     "update_project_settings",
@@ -1279,6 +1281,47 @@ def _weightings_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 
 register("set_investment_period_weightings", Adapter("settings_edit", _weightings_preview, _weightings_readback))
+
+
+# template-e2e 02: one period of a Link's energization schedule, the MW the
+# route writes flat across it. The preview is the writer's own check
+# (`plan_period_mw`, nothing written), so a card is never offered for an edit
+# the route refuses, and its refusal keeps the route's kind.
+def _energization_row(args: dict) -> tuple[str, str]:
+    link = args.get("link")
+    if not isinstance(link, str) or not link:
+        _refuse("energization_invalid_request", "Send {link, period, mw}: the link's name, the period and the MW.")
+    return link, args.get("period")
+
+
+def _energization_preview(args: dict) -> list[dict]:
+    from services.adequacy import energization as E
+    from services.pypsa_service import PyPSAService
+
+    link, period = _energization_row(args)
+    if "mw" not in args:
+        _refuse("energization_invalid_request", "Send {link, period, mw}: the link's name, the period and the MW.")
+    try:
+        plan = E.plan_period_mw(PyPSAService.get_network(), link, period, args["mw"])
+    except E.EnergizationEditError as exc:
+        _refuse(exc.error_kind, exc.message)
+    when = "" if plan["period"] == E.ALL else f" for {plan['period']}"
+    return [{"component_class": "Settings", "name": link, "field": f"energization.{plan['period']}",
+             "label": f"Energized capacity{when}", "says_name": f"{link} energized capacity{when}",
+             "old": plan["previous_mw"], "new": plan["mw"], "unit": "MW", "role": "typed"}]
+
+
+def _energization_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.adequacy import energization as E
+    from services.pypsa_service import PyPSAService
+
+    read = E.by_period(PyPSAService.get_network(), rows[0]["name"]) if rows else None
+    values = (read or {}).get("by_period") or {}
+    return [values.get(row["field"].partition(".")[2]) for row in rows]
+
+
+register("set_energization_period", Adapter("settings_edit", _energization_preview, _energization_readback,
+                                            section_id="connection"))
 
 
 # ── The network's periods: set_snapshots / set_multi_period_snapshots / set_investment_periods

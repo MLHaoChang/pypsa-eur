@@ -121,6 +121,67 @@ def test_chat_is_refused_when_the_project_is_not_the_open_one(client, tmp_projec
     assert _row(client, name)["energization"][0]["by_period"] == AS_BUILT
 
 
+def _in_context(name, run):
+    from services.pypsa_service import PyPSAService
+
+    ctx = next(
+        c for c in list(PyPSAService._contexts.values()) if c.loaded_project == name
+    )
+    binding = PyPSAService.bind_request_context(ctx)
+    try:
+        return run()
+    finally:
+        PyPSAService.reset_request_context(binding)
+
+
+def test_the_edit_card_shows_old_to_new_and_reads_back_the_write(
+    client, tmp_projects_dir
+):
+    from harness import edit_card
+
+    assert edit_card.is_edit(TOOL) and TOOL in edit_card.SETTINGS_EDITS
+    name = _create(client, "eh_datacenter_staged", "staged02c_card")
+    args = {"name": name, "link": LINK, "period": 2030, "mw": 30}
+    card = _in_context(name, lambda: edit_card.preview(TOOL, args, with_state=False))
+    (row,) = card["rows"]
+    assert (row["old"], row["new"], row["unit"], row["field"]) == (
+        55.0,
+        30.0,
+        "MW",
+        "energization.2030",
+    )
+    assert card["section"]["id"] == "connection" and card["complete"] is True
+    assert card["says"] == f"{LINK} energized capacity for 2030 55 → 30 MW"
+    # The preview writes nothing.
+    assert _row(client, name)["energization"][0]["by_period"] == AS_BUILT
+    _call(**args)
+    assert (
+        _in_context(name, lambda: edit_card.receipt(card, args))["outcome"]
+        == "verified"
+    )
+
+
+@pytest.mark.parametrize(
+    ("args", "kind"),
+    [
+        ({"link": LINK, "period": 2030}, "energization_invalid_request"),
+        ({"period": 2030, "mw": 5}, "energization_invalid_request"),
+        ({"link": LINK, "period": 2030, "mw": -1}, "energization_invalid_mw"),
+        ({"link": LINK, "period": 2099, "mw": 5}, "energization_unknown_period"),
+    ],
+)
+def test_the_card_refuses_as_the_route_does(client, tmp_projects_dir, args, kind):
+    from harness import edit_card
+
+    name = _create(client, "eh_datacenter_staged", f"staged02c_card_{kind}")
+    with pytest.raises(HTTPException) as exc:
+        _in_context(
+            name,
+            lambda: edit_card.preview(TOOL, {"name": name, **args}, with_state=False),
+        )
+    assert exc.value.detail["error_kind"] == kind
+
+
 def test_a_viewer_is_refused_before_dispatch_and_nothing_changes(world, as_user):
     from harness.loop import dispatch_tool_call
     from harness.session import ChatSession
