@@ -19,6 +19,8 @@ POST   /api/auth/login  none sign-in and account
 POST   /api/auth/logout  none sign-in and account
 POST   /api/auth/reset-password  none sign-in and account
 POST   /api/auth/set-password  none sign-in and account
+DELETE /api/campus-electrical/{name}/background-harmonics  write path:name
+PUT    /api/campus-electrical/{name}/background-harmonics  write path:name
 PUT    /api/campus-electrical/{name}/campus  write path:name
 POST   /api/campus-electrical/{name}/dc-architecture/compare  write path:name
 PUT    /api/campus-electrical/{name}/dc-backup  write path:name
