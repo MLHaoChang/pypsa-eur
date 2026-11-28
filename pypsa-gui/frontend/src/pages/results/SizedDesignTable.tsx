@@ -157,9 +157,9 @@ export function SizedDesignTable({ report, mode, testId }: {
                 <tr key={`${r.label}-${i}`} data-testid={`${testId}-not-counted-${i}`}
                   className="border-t border-border/50 align-top">
                   <td className={cell}>{r.label}</td>
-                  {/* Figures in mono, a sentence in the text font; the over-limit
+                  {/* Figures right-aligned in mono, a sentence left in the text font; the over-limit
                       verdict is the payload's, in words and in warn colour. */}
-                  <td className={`${cell} text-right${r.sentence ? '' : ' font-mono'}${r.warn ? ' text-warn' : ''}`}>
+                  <td className={`${cell}${r.sentence ? ' text-left' : ' text-right font-mono'}${r.warn ? ' text-warn' : ''}`}>
                     {r.value}
                   </td>
                 </tr>

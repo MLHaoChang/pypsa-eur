@@ -157,8 +157,11 @@ describe('the not-counted cells set figures apart from sentences (UX 34)', () =>
       product_slacks: [{ name: 's', process_role: 'shortfall', carrier: 'NH3', p_nom: 1, energy: 2, unit: 'MW', energy_unit: 'MWh' }],
       grid_supply_counted: ['g is counted: bus grid also holds load L'] })} />)
     expect(cellOf(0).className).not.toContain('font-mono')
+    expect(cellOf(0).className).toContain('text-left')
     expect(cellOf(1).className).toContain('font-mono')
+    expect(cellOf(1).className).toContain('text-right')
     expect(cellOf(2).className).not.toContain('font-mono')
+    expect(cellOf(2).className).toContain('text-left')
     cleanup()
     render(<SizedDesignTable testId="t" mode="expert" report={report([], { grid_connection_mw: 40 })} />)
     expect(cellOf(0).className).toContain('font-mono')
