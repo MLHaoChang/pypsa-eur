@@ -507,6 +507,24 @@ def get_pack_judgment(proj: AuthorizedProject = ProjectAccessDep, db: DBSession 
     return campus_judgment.get_judgment(_row(proj, db))
 
 
+# ── the PowerFactory (DGS) hand-off (grid-compliance 09, item 6) ──
+
+@router.get("/{name}/powerfactory")
+def list_powerfactory_bundles(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The latest campus run's PowerFactory (DGS) bundles, and whether the run is stale."""
+    return ce.powerfactory_bundles(_row(proj, db))
+
+
+@router.get("/{name}/powerfactory/{bundle}/download")
+def download_powerfactory_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep,
+                                 db: DBSession = Depends(get_db)):
+    """One PowerFactory bundle as a zip, picked from the listing as the PSS/E download is."""
+    data, stale = ce.powerfactory_bundle_zip(_row(proj, db), bundle)
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(f"{bundle}.zip"),
+                             "X-Run-Stale": "true" if stale else "false"})
+
+
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────
 
 @router.get("/{name}/island")

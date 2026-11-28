@@ -35,16 +35,19 @@ import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
   campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind, NO_LIMIT_DETAIL,
   type CampusRunJob, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
-  type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type TransformerSizing,
+  type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type PowerFactoryBundle, type PowerFactoryNotWritten, type TransformerSizing,
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
 import { usePanelSectionScroll } from './usePanelSectionScroll'
 import { openPanel } from './results/openPanel'
+import { ALL_TABS } from './results/resultTabs'
+import { withReturnFrom } from '../layout/flowNavigation'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import EmptyState from '../components/EmptyState'
+import ResultState from '../components/ResultState'
 import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
@@ -645,6 +648,18 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
   )
 }
 
+/** Hands a downloaded zip to the browser as `<bundle>.zip`. */
+function saveZip(blob: Blob, bundle: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${bundle}.zip`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 /** The PSS/E hand-off of the latest run (grid-compliance 23): one case per island critical hour, each a zip
  *  of the .raw, the .dyr, the grid-forming converter parameters and the README. A case from a run older than the last edit says so. */
 export function CampusPsseSection({ name }: { name: string }) {
@@ -657,14 +672,7 @@ export function CampusPsseSection({ name }: { name: string }) {
     setFailure(null)
     try {
       const { blob } = await campusApi.psseZip(name, bundle)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${bundle}.zip`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      saveZip(blob, bundle)
     } catch {
       setFailure('The PSS/E case could not be downloaded. Try again.')
     } finally {
@@ -702,6 +710,153 @@ export function CampusPsseSection({ name }: { name: string }) {
   )
   return (
     <PageSection title="PSS/E case" hint="the island critical hours, grid-connected before the trip, for the TSO's PSS/E">
+      {body}
+    </PageSection>
+  )
+}
+
+/** A long list folds after this many names, behind "(N more) Show all" (the banner-list rule). */
+const FOLD_AFTER = 5
+
+/** The quantity each attribute the DGS writer can leave out names (gridspine `NOT_WRITTEN_COLUMNS`'
+ *  `attribute`); the engine key itself never reaches the user. */
+const PF_QUANTITY: Record<string, string> = { p_mw: 'active power', q_mvar: 'reactive power' }
+
+/** The manifest's own words for the check every case waits on (gridspine `PENDING_VERIFICATION`). */
+const PF_PENDING_ATTRIBUTE_NAMES = 'attribute names pending verification on first PowerFactory import'
+
+/** A value a PowerFactory case leaves out, by its element and quantity ("PV 1 reactive power");
+ *  an unknown attribute reads as the element alone. */
+export function powerFactoryValueName(i: PowerFactoryNotWritten): string {
+  return [i.element, PF_QUANTITY[i.attribute]].filter(Boolean).join(' ') || 'An unnamed element'
+}
+
+/** Which case a bundle is: the run's `hour` is the snapshot's place in the period (0 for the first),
+ *  so its date and time are not known here. */
+export function powerFactoryWhen(b: PowerFactoryBundle): string {
+  return b.period != null && b.hour != null ? `Period ${b.period} · time step ${b.hour}` : b.name
+}
+
+/** The checks a PowerFactory case waits on, one line each; an unreadable manifest is one line too.
+ *  A case with any of them, or with a value not written, never reads as complete. */
+export function powerFactoryGaps(b: PowerFactoryBundle): string[] {
+  if (b.not_written == null || b.pending_verification == null) {
+    return ["This case's manifest cannot be read, so what it leaves out is unknown. Run the study again before sending it."]
+  }
+  return b.pending_items.map(item => (item.trim() === PF_PENDING_ATTRIBUTE_NAMES
+    ? 'Check on first import into PowerFactory: the attribute names are not yet verified.'
+    : `Check on first import into PowerFactory: ${item.trim().replace(/\.$/, '')}.`))
+}
+
+/** The values a case leaves out, by name, folded after five behind "(N more) Show all". */
+function PowerFactoryNotWritten({ b }: { b: PowerFactoryBundle }) {
+  const [open, setOpen] = useState(false)
+  const names = b.not_written_items.map(powerFactoryValueName)
+  if (b.not_written == null || names.length === 0) return null
+  const folded = names.length > FOLD_AFTER && !open
+  return (
+    <p data-testid={`pf-not-written-${b.name}`} className="text-[12px] text-warn mt-0.5">
+      {names.length} {names.length === 1 ? 'value' : 'values'} not written:{' '}
+      <span data-testid={`pf-not-written-names-${b.name}`}>{(folded ? names.slice(0, FOLD_AFTER) : names).join(', ')}</span>
+      {names.length > FOLD_AFTER && (
+        <>
+          {' '}
+          <button type="button" data-testid={`pf-not-written-toggle-${b.name}`} aria-expanded={open}
+            className="text-text" onClick={() => setOpen(o => !o)}>
+            {open
+              ? <span className="underline">Show fewer</span>
+              : <><span className="text-muted">({names.length - FOLD_AFTER} more)</span> <span className="underline">Show all</span></>}
+          </button>
+        </>
+      )}
+      . See manifest.json in the zip.
+    </p>
+  )
+}
+
+/** How long the download-failed notice stays before it clears. */
+const PF_NOTICE_MS = 8000
+
+/** Opens the Grid study panel with a Back pill to the results tab the link sits in. */
+function openGridStudyFrom(tab: Exclude<CampusResultsPart, 'all'>) {
+  withReturnFrom(() => openPanel('scenarios', 'campusStudy'), ALL_TABS.find(t => t.id === tab)?.label)
+}
+
+export function CampusPowerFactorySection({ name }: { name: string }) {
+  const pf = useQuery({ queryKey: ['campus-powerfactory', name], queryFn: () => campusApi.powerfactory(name), retry: false })
+  const [busy, setBusy] = useState<string | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  // The notice clears after a while, or when the next download starts; it never sits stale.
+  useEffect(() => {
+    if (!failure) return
+    const t = setTimeout(() => setFailure(null), PF_NOTICE_MS)
+    return () => clearTimeout(t)
+  }, [failure])
+  const d = pf.data
+  async function download(bundle: string) {
+    setBusy(bundle)
+    setFailure(null)
+    try {
+      const { blob } = await campusApi.powerfactoryZip(name, bundle)
+      saveZip(blob, bundle)
+    } catch {
+      setFailure('The PowerFactory case could not be downloaded. Try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+  const gridStudy = { label: 'Grid study ›', onClick: () => openGridStudyFrom('grid_code') }
+  let body: ReactNode
+  if (pf.isError) body = <div data-testid="pf-error"><ResultState state="unavailable" reason="The PowerFactory cases could not be read. Try again in a moment." /></div>
+  else if (!d) body = <p className="text-[12px] text-muted">Loading the PowerFactory cases</p>
+  else if (!d.has_run) body = <div data-testid="pf-none"><ResultState state="not_run" action={gridStudy} reason="No grid study has run yet. Run the study in the Grid study panel. It then writes one PowerFactory case for each island critical hour." /></div>
+  else if (!d.has_powerfactory) body = <div data-testid="pf-older-run"><ResultState state="not_run" action={gridStudy} reason="This run was made before the PowerFactory export. Run the study again to write the PowerFactory cases." /></div>
+  else if (d.error) body = <p data-testid="pf-write-error" className="text-[12px] text-warn">The study could not write the PowerFactory cases. The other results are not affected. Run the study again.</p>
+  else if (d.bundles.length === 0) body = (
+    <p data-testid="pf-skipped" className="text-[12px] text-muted">
+      This run has no island critical hours, so there is no PowerFactory case. Add island data in the Island
+      section of the Grid study panel, then run the study again.{' '}
+      <button type="button" data-testid="pf-grid-study-link" className="underline" onClick={gridStudy.onClick}>
+        {gridStudy.label}
+      </button>
+    </p>
+  )
+  else body = (
+    <>
+      {d.stale && (
+        <p data-testid="pf-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2 mb-2">
+          These cases are out of date: the campus or the project changed after this run. Run the study again before sending them.
+        </p>
+      )}
+      <ul className="space-y-2">
+        {d.bundles.map(b => (
+          <li key={b.name} data-testid={`pf-bundle-${b.name}`} className="text-[12px]">
+            <div className="flex items-center gap-3">
+              <span data-testid={`pf-row-${b.name}`} className="whitespace-nowrap tabular-nums">
+                {powerFactoryWhen(b)}
+                <span className="text-muted"> · {b.files.length} {b.files.length === 1 ? 'file' : 'files'} · {Math.max(1, Math.round(b.size / 1024))} kB</span>
+              </span>
+              <Btn onClick={() => download(b.name)} disabled={busy === b.name}
+                aria-label={`Download PowerFactory case, ${powerFactoryWhen(b).replace(/^Period/, 'period').replace(' · ', ', ')}`}
+                title="The DGS file, the name map, the harmonic sources, the hour's load flow and the manifest of this case, as a zip">
+                Download PowerFactory case
+              </Btn>
+            </div>
+            <PowerFactoryNotWritten b={b} />
+            {powerFactoryGaps(b).map((line, i) => (
+              <p key={i} data-testid={`pf-gap-${b.name}`} className="text-[12px] text-warn mt-0.5">{line}</p>
+            ))}
+          </li>
+        ))}
+      </ul>
+      {d.run_at && <p className="text-[11px] text-muted mt-1">From the run of {d.run_at.slice(0, 16).replace('T', ' ')} UTC.</p>}
+      <div role="status" aria-live="polite">
+        {failure && <p data-testid="pf-download-error" className="text-[12px] text-warn mt-1">{failure}</p>}
+      </div>
+    </>
+  )
+  return (
+    <PageSection title="PowerFactory case" hint="the island critical hours as DGS files, for the TSO's PowerFactory">
       {body}
     </PageSection>
   )
@@ -831,6 +986,7 @@ function ResultsSection({ state, pending, name, show = 'all' }: { state: CampusS
       {grid && <CampusDipsRestartSection dips={r.dips_restart} />}
 
       {grid && <CampusPsseSection name={name} />}
+      {grid && <CampusPowerFactorySection name={name} />}
 
       {design && <>
       <PageSection panelSection="electrical_design" title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
@@ -942,7 +1098,7 @@ export function CampusResultsTab({ name, part }: { name: string; part: Exclude<C
   if (!state.data.results) {
     return (
       <EmptyState testId="campus-tab-state" title="Not run yet"
-        action={{ label: 'Run the grid checks in Grid study ›', onClick: () => openPanel('scenarios', 'campusStudy') }}>
+        action={{ label: 'Run the grid checks in Grid study ›', onClick: () => openGridStudyFrom(part) }}>
         The grid study has not produced results for this project.
       </EmptyState>
     )

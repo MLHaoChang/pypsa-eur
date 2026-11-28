@@ -192,6 +192,27 @@ export interface PsseBundles {
   error: string | null
 }
 
+/** One value a PowerFactory (DGS) case could not carry, from the case's manifest. */
+export interface PowerFactoryNotWritten {
+  element: string
+  attribute: string
+  reason: string
+}
+
+/** A PowerFactory case. The counts are null when its manifest cannot be read. */
+export interface PowerFactoryBundle extends PsseBundle {
+  not_written: number | null
+  pending_verification: number | null
+  not_written_items: PowerFactoryNotWritten[]
+  pending_items: string[]
+}
+
+/** `GET /powerfactory`: as `PsseBundles`; `has_powerfactory` is false for a run made before the export. */
+export interface PowerFactoryBundles extends Omit<PsseBundles, 'bundles'> {
+  has_powerfactory: boolean
+  bundles: PowerFactoryBundle[]
+}
+
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
 export interface UnresolvedNeed { need: string; reason: string }
 
@@ -1189,6 +1210,15 @@ export const campusApi = {
   /** One bundle as a zip blob. */
   psseZip: (project: string, bundle: string) =>
     client.get<Blob>(`${base(project)}/psse/${encodeURIComponent(bundle)}/download`, { responseType: 'blob', ...quiet })
+      .then(r => ({ blob: r.data, stale: r.headers['x-run-stale'] === 'true' })),
+
+  /** The latest campus run's PowerFactory (DGS) cases. */
+  powerfactory: (project: string) =>
+    client.get<PowerFactoryBundles>(`${base(project)}/powerfactory`, quiet).then(r => r.data),
+
+  /** One PowerFactory case as a zip blob. */
+  powerfactoryZip: (project: string, bundle: string) =>
+    client.get<Blob>(`${base(project)}/powerfactory/${encodeURIComponent(bundle)}/download`, { responseType: 'blob', ...quiet })
       .then(r => ({ blob: r.data, stale: r.headers['x-run-stale'] === 'true' })),
 
   /** The island sidecar as written and the last island study (null each when absent). */

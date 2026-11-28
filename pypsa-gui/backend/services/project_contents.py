@@ -210,6 +210,7 @@ NOT_CARRIED: dict[str, str] = {
     "campus_profile_used.json": "campus: derived on every run",
     "campus_ratings_library.yaml": "campus: the library a run's ratings were priced from, kept with the run",
     "psse_status.json": "campus: derived on every run (the PSS/E bundle outcome)",
+    "powerfactory_status.json": "campus: derived on every run (the PowerFactory bundle outcome)",
     "judgment_source.json": "campus: which EMT bundle a run's judgment came from; stays with that judgment",
     "draft_notes.json": "campus: a grid-code draft stays with its licensee",
     "settings.json": "campus: per-install settings",
