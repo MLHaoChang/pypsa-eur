@@ -446,15 +446,21 @@ def test_export_falls_back_to_the_study_record_after_a_later_solve():
     """TE2E-16: the stored report is cleared by a later solve; the study
     record's copy still exports, in the same shape. Not while it runs."""
     report = ReferenceDesignReport(
-        archetype="strong_grid", pack_hash="a", assumptions_hash="b")
-    record = {"status": "done",
-              "report": report.model_dump(mode="json", by_alias=True)}
+        archetype="strong_grid", pack_hash="a", assumptions_hash="b"
+    )
+    record = {"status": "done", "report": report.model_dump(mode="json", by_alias=True)}
     body, status = R.eh_reference_design_http_payload({}, record)
     assert status == 200
-    assert body == R.eh_reference_design_http_payload(
-        {R.EH_REPORT_STORE_KEY: report.model_dump(mode="json")})[0]
-    assert R.eh_reference_design_http_payload(
-        {}, {**record, "status": "running"})[1] == 204
+    assert (
+        body
+        == R.eh_reference_design_http_payload(
+            {R.EH_REPORT_STORE_KEY: report.model_dump(mode="json")}
+        )[0]
+    )
+    assert (
+        R.eh_reference_design_http_payload({}, {**record, "status": "running"})[1]
+        == 204
+    )
     assert R.eh_reference_design_http_payload({}, {"status": "done"})[1] == 204
 
 
