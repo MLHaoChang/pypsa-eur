@@ -1170,3 +1170,26 @@ def test_a_viewer_reads_the_background_harmonics_and_cannot_write_them(
     assert put.status_code == 403, put.text
     assert viewer.delete(url).status_code == 403
     assert calls == []
+
+
+def test_the_background_upload_reads_at_most_the_cap_plus_one_byte(
+    world, as_user, monkeypatch
+):
+    """Grid-compliance 29 (GK A2 G4): the route reads 1 MiB + 1 byte at most, so the service refuses an
+    oversized file without the request buffering it whole."""
+    from services import campus_electrical_service as ce
+
+    seen = []
+    monkeypatch.setattr(
+        ce, "put_background", lambda project, data, *a: seen.append(len(data)) or {}
+    )
+    editor = as_user(world["editor"])
+    url = f"/api/campus-electrical/{world['project']}/background-harmonics"
+    big = b"x" * (3 * 1024 * 1024)
+    got = editor.put(
+        url,
+        files={"file": ("bg.csv", big, "text/csv")},
+        data={"source": "s", "measured_on": "2026-10-03"},
+    )
+    assert got.status_code == 200, got.text
+    assert seen == [1024 * 1024 + 1]

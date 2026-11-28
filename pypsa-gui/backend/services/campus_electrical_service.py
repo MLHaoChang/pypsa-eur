@@ -2825,24 +2825,28 @@ def _record_sha256(meta: dict | None) -> str:
     return hashlib.sha256(body.encode()).hexdigest()
 
 
-def _background_meta(d: Path) -> dict | None:
-    """The stored measurement's record, or None when there is none (no record; a CSV without one is a write
-    that never completed and reads as none). A record whose CSV is missing or no longer matches its sha256
-    raises ``ValueError``: reading it as none stored would be wrong."""
+def _background_stored(d: Path) -> tuple:
+    """``(record, bytes)`` of the stored measurement, the bytes those the record's sha256 was checked on (one
+    read); ``(None, None)`` when there is none (no record; a CSV without one is a write that never completed
+    and reads as none). A record whose CSV is missing or no longer matches its sha256 raises ``ValueError``:
+    reading it as none stored would be wrong."""
     meta_file = d / BACKGROUND_META
     if not meta_file.is_file():
-        return None
+        return None, None
     meta = json.loads(meta_file.read_text())
     data = (d / BACKGROUND_DATA).read_bytes()
     if not isinstance(meta, dict) or meta.get("sha256") != hashlib.sha256(data).hexdigest():
         raise ValueError("the stored measurement does not match its record")
-    return meta
+    return meta, data
+
+
+def _pcc_bus(campus_file: Path) -> str:
+    return str(yaml.safe_load(campus_file.read_text())["campus"]["pcc"]["bus"])
 
 
 def _campus_poc(project) -> str:
-    campus = campus_dir(project) / CAMPUS_FILE
     try:
-        return str(yaml.safe_load(campus.read_text())["campus"]["pcc"]["bus"])
+        return _pcc_bus(campus_dir(project) / CAMPUS_FILE)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=422, detail={
             "error_kind": "campus_background_no_campus",
@@ -2862,7 +2866,7 @@ def _background_view(meta: dict | None, run: Path) -> dict:
     return {"has_background": True,
             **{k: meta.get(k) for k in ("source", "measured_on", "filename", "orders", "poc", "uploaded_at")},
             "in_latest_run": used is not None and used.get("record_sha256") == _record_sha256(meta)
-            and used.get("status") == "used"}
+            and used.get("status") == "used" and (run / HARMONIC_EMISSION_META).is_file()}
 
 
 def get_background(project) -> dict:
@@ -2872,7 +2876,7 @@ def get_background(project) -> dict:
     d = _background_dir(project)
     with _lock(d):
         try:
-            meta = _background_meta(d)
+            meta, _ = _background_stored(d)
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=409, detail={
                 "error_kind": "campus_background_unreadable",
@@ -2967,8 +2971,7 @@ def _take_background(project, work: Path) -> dict:
     reason = None
     with _lock(d):
         try:
-            meta = _background_meta(d)
-            data = (d / BACKGROUND_DATA).read_bytes() if meta is not None else None
+            meta, data = _background_stored(d)
         except (OSError, ValueError) as exc:
             meta, data = None, None
             reason = f"the stored measurement cannot be read ({exc}); remove it and upload it again"
@@ -2978,13 +2981,13 @@ def _take_background(project, work: Path) -> dict:
         out = {"status": "none", "record_sha256": "none"}
     else:
         out = {"record_sha256": _record_sha256(meta)}
-        pcc = str(yaml.safe_load((work / cs.CAMPUS_YAML).read_text())["campus"]["pcc"]["bus"])
+        pcc = _pcc_bus(work / cs.CAMPUS_YAML)
         if str(meta.get("poc")) != pcc:
             out.update(status="unusable", reason=f"it was measured at {meta.get('poc')}, but the campus PCC is "
                                                  f"now {pcc}; upload it again for {pcc}")
         else:
             try:
-                rec = cs.import_background_campus(work, data, meta["source"], meta["measured_on"],
+                rec = cs.import_background_campus(work, data, meta.get("source"), meta.get("measured_on"),
                                                   meta.get("filename"))
             except ContractError as exc:
                 out.update(status="unusable", reason=f"the stored measurement no longer reads ({exc}); "
@@ -3010,8 +3013,12 @@ def _background_pins(project, d: Path) -> list[Pin]:
     used = _background_used(d / "run")
     if used is None:
         return []
-    return [Pin("background", used.get("record_sha256"),
-                lambda: _record_sha256(_background_meta(_background_dir(project))))]
+    def now():
+        d = _background_dir(project)
+        with _lock(d):  # never between a PUT's two renames
+            return _record_sha256(_background_stored(d)[0])
+
+    return [Pin("background", used.get("record_sha256"), now)]
 
 
 def _unknown_background_rows(out: pd.DataFrame, reason: str) -> pd.DataFrame:
@@ -3027,7 +3034,7 @@ def _unknown_background_rows(out: pd.DataFrame, reason: str) -> pd.DataFrame:
     rows = []
     for row in out[out["level"] == "poc"].to_dict("records"):
         rows.append(dict(row, **dict.fromkeys(blank), label=f"{WITH_BACKGROUND}; {hm.LABEL}",
-                         verdict="unknown", note=f"Background not used: {reason}"))
+                         verdict="unknown", note=f"Background not used: {reason}; {row['note']}"))
     return pd.concat([out, pd.DataFrame(rows, columns=out.columns, dtype=object)], ignore_index=True)
 
 
@@ -3053,14 +3060,16 @@ def _harmonic_emission(project, run: Path, profile: str, profile_dirs) -> None:
         if background["status"] == "unusable":
             out = _unknown_background_rows(out, background["reason"])
             atomic_write_text(run / cs.HARMONICS_CSV, out.to_csv(index=False))
+        meta = {"background": {k: v for k, v in background.items() if k != "record_sha256"}, "label": hm.LABEL}
+        atomic_write_text(run / HARMONIC_EMISSION_META, json.dumps(meta))
     except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
         if not isinstance(exc, ContractError):
             logger.exception("campus run: the harmonic emission screen failed in %s", run)
         clear()
-        (run / HARMONIC_EMISSION_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
-        return
-    meta = {"background": {k: v for k, v in background.items() if k != "record_sha256"}, "label": hm.LABEL}
-    (run / HARMONIC_EMISSION_META).write_text(json.dumps(meta))
+        try:
+            atomic_write_text(run / HARMONIC_EMISSION_ERROR, json.dumps({"error": str(exc) or type(exc).__name__}))
+        except OSError:  # nothing to show then; the results read "not run" for this screen
+            logger.exception("campus run: the harmonic emission error could not be written in %s", run)
 
 
 def _harmonic_emission_results(run: Path) -> dict | None:

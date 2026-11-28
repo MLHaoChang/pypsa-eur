@@ -271,7 +271,7 @@ def _refused(project, status, kind, field, **kw):
 
 
 def test_the_size_cap_is_named_and_refused_with_413(drafted):
-    pad = b"x" * (ce.MAX_BACKGROUND_BYTES - len(CSV) + 1)
+    pad = b"x" * (1024 * 1024 - len(CSV) + 1)  # the literal cap: 1 MiB
     msg = _refused(drafted, 413, "campus_background_too_large", "file", data=CSV + pad)
     assert msg.startswith("File:")
 
@@ -280,10 +280,10 @@ def test_the_size_cap_is_named_and_refused_with_413(drafted):
     "kw,field",
     [
         ({"source": "   "}, "source"),
-        ({"source": "s" * (ce.MAX_BACKGROUND_TEXT + 1)}, "source"),
+        ({"source": "s" * 201}, "source"),
         ({"measured_on": "03.10.2026"}, "measured_on"),
         ({"measured_on": ""}, "measured_on"),
-        ({"filename": "f" * (ce.MAX_BACKGROUND_TEXT + 1)}, "filename"),
+        ({"filename": "f" * 201}, "filename"),
         ({"data": b"order,u_h_pct_p95\n5,-0.1\n"}, "file"),
         ({"data": b"not,a,measurement\n"}, "file"),
     ],
@@ -344,7 +344,6 @@ def test_put_and_delete_take_the_same_lock(drafted, monkeypatch):
     """While a PUT holds the store's lock, a DELETE waits for it: the store ends as the whole pair or none."""
     d = ce.campus_dir(drafted) / ce.BACKGROUND_DIR
     entered, release = threading.Event(), threading.Event()
-    real = ce.cs.CAMPUS_YAML  # noqa: F841 - the PUT is held in its PCC read
     real_poc = ce._campus_poc
 
     def held(project):
@@ -366,3 +365,27 @@ def test_put_and_delete_take_the_same_lock(drafted, monkeypatch):
     assert (
         not (d / ce.BACKGROUND_META).exists() and not (d / ce.BACKGROUND_DATA).exists()
     )
+
+
+def test_exactly_at_the_caps_is_not_refused_for_size(drafted):
+    pad = b"x" * (
+        1024 * 1024 - len(CSV)
+    )  # 1 MiB exactly: past the size check, refused by the parse
+    _refused(drafted, 422, "campus_background_invalid", "file", data=CSV + pad)
+    assert (
+        _put(drafted, source="s" * 200, filename="f" * 196 + ".csv")["source"]
+        == "s" * 200
+    )
+
+
+def test_the_unknown_row_keeps_the_screen_note(drafted):
+    _put(drafted)
+    _rename_pcc(drafted)
+    emission = _run(drafted)
+    plant = next(
+        r
+        for r in _poc_rows(emission)
+        if not str(r["label"]).startswith("with background")
+    )
+    (unknown,) = _with_bg(emission)
+    assert unknown["note"].endswith(plant["note"])
