@@ -332,7 +332,7 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
                 ))}
               </ul>
             </div>)
-        : kinds.length === 0 ? (showLimit ? null
+        : kinds.length === 0 ? (showLimit || only ? null
             : <p className="text-[12px] text-muted">No grid connection is tagged on this project.</p>)
           : (
             <ul className="flex flex-col gap-3" data-testid="connection-limits">
@@ -372,7 +372,7 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
               })}
             </ul>
           )}
-      {!only && <ul className="mt-3 flex flex-col gap-3"><BackgroundHarmonicsRow /></ul>}
+      {(!only || only.includes('background_harmonics')) && <ul className="mt-3 flex flex-col gap-3"><BackgroundHarmonicsRow /></ul>}
     </PageSection>
   )
 }

@@ -105,3 +105,31 @@ export default function BackgroundHarmonicsRow() {
     </li>
   )
 }
+
+/** Guided's read-only line on the Site card: what is stored, and Edit › into the field drawer. */
+export function BackgroundHarmonicsSummary({ onEdit, liveStudy }: { onEdit: () => void; liveStudy: boolean }) {
+  const project = useUIStore(s => s.currentProject) ?? ''
+  const readOnly = useUIStore(s => s.readOnly)
+  const stored = useQuery({ queryKey: KEY(project), queryFn: () => campusApi.backgroundHarmonics(project),
+    enabled: !!project, retry: false })
+  const state = useQuery({ queryKey: STATE_KEY(project), queryFn: () => campusApi.state(project),
+    enabled: !!project, retry: false })
+  if (stored.isError || stored.data == null) return null
+  const b = stored.data
+  const hasRun = state.data?.results != null
+  return (
+    <li data-testid="hub-site-background-harmonics" className="flex flex-wrap items-center gap-2 text-[12px]">
+      <span className="flex-1 min-w-[16rem]">
+        Background harmonics at the PCC:{' '}
+        <span className="text-text">{b.has_background ? storedLine(b, hasRun) : 'none'}</span>
+        {b.has_background && hasRun && !b.in_latest_run && (
+          <span className="block text-warn">Out of date: the background changed after the last run.</span>
+        )}
+      </span>
+      {!readOnly && (
+        <button type="button" data-testid="hub-site-background-harmonics-edit" disabled={liveStudy} onClick={onEdit}
+          className="shrink-0 text-[11px] text-text underline disabled:opacity-50">Edit ›</button>
+      )}
+    </li>
+  )
+}
