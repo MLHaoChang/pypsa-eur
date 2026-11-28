@@ -22,7 +22,9 @@ vi.mock('../../api/uploads', async () => {
   return { ...real, ...uploads }
 })
 
-const charts = vi.hoisted(() => ({ listReportCharts: vi.fn(), removeReportChart: vi.fn() }))
+const charts = vi.hoisted(() => ({
+  listReportCharts: vi.fn(), removeReportChart: vi.fn(), getReportVariants: vi.fn(),
+}))
 vi.mock('../../api/reports', async () => {
   const real = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
   return { ...real, ...charts }
@@ -58,6 +60,7 @@ beforeEach(() => {
   resetReportCharts()
   charts.listReportCharts.mockReset().mockResolvedValue({ charts: [], limit: 12 })
   charts.removeReportChart.mockReset().mockResolvedValue(undefined)
+  charts.getReportVariants.mockReset().mockResolvedValue(null)
   uploads.listUploads.mockReset().mockResolvedValue([TEMPLATE_UPLOAD])
 })
 
@@ -230,5 +233,39 @@ describe('GenerateReportDialog — template (WP11)', () => {
   it('says in words that no chart was added yet', async () => {
     renderDialog({ project: 'demo' })
     expect((await screen.findByTestId('report-charts-list')).textContent).toMatch(/No charts added yet/)
+  })
+  describe('report variants (business-case 19)', () => {
+    const INFO = { study_id: 's1', rankable_npv: 4, rankable_irr: 3, stale: false, stale_reasons: [] }
+    beforeEach(() => {
+      charts.listReportCharts.mockResolvedValue({ charts: [], limit: 12 })
+    })
+
+    it('offers Standard, Top 3 by NPV and Greatest IRR, states the rule and sends the choice', async () => {
+      charts.getReportVariants.mockResolvedValue(INFO)
+      const user = userEvent.setup()
+      const { onGenerate } = renderDialog({ project: 'demo' })
+      const group = await screen.findByRole('group', { name: 'Report variant' })
+      expect((within(group).getByLabelText('Standard') as HTMLInputElement).checked).toBe(true)
+      await user.click(within(group).getByLabelText('Top 3 by NPV'))
+      expect(screen.getByTestId('report-variant-rule').textContent)
+        .toBe('Ranks the options by NPV, highest first. The report shows the top 3.')
+      await user.click(screen.getByRole('button', { name: /generate/i }))
+      await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ variant: 'top_npv' })))
+    })
+
+    it('is hidden with fewer than two options to rank', async () => {
+      charts.getReportVariants.mockResolvedValue({ ...INFO, rankable_npv: 1, rankable_irr: 0 })
+      renderDialog({ project: 'demo' })
+      await waitFor(() => expect(charts.getReportVariants).toHaveBeenCalled())
+      expect(screen.queryByTestId('report-variants')).toBeNull()
+    })
+
+    it('says the compare is out of date and offers no variant', async () => {
+      charts.getReportVariants.mockResolvedValue({ ...INFO, stale: true, stale_reasons: ['ledger changed'] })
+      renderDialog({ project: 'demo' })
+      const group = await screen.findByTestId('report-variants')
+      expect(group.textContent).toMatch(/option compare is out of date/)
+      expect(within(group).queryByRole('radio')).toBeNull()
+    })
   })
 })

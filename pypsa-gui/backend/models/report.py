@@ -187,6 +187,9 @@ class ReportDocument(_Model):
     # when None, so a version that is not a revision is written byte-equal to
     # before (GK B R7). `store.save_version` sets it on every write.
     revised_from: RevisedFrom | None = PField(default=None, exclude_if=lambda v: v is None)
+    # business-case 19: the report variant (variant, n, study_id) a new report was
+    # generated with; kept on a regenerate, left out of the stored JSON when None.
+    variant: dict | None = PField(default=None, exclude_if=lambda v: v is None)
 
 
 class ReportMeta(_Model):

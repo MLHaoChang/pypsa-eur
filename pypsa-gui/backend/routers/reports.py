@@ -560,7 +560,8 @@ def create_report(body: CreateReportBody,
 
 
 def store_evidence_only_report(project: AuthorizedProject, evidence: Evidence,
-                               figure_pngs: dict, title: str | None) -> dict:
+                               figure_pngs: dict, title: str | None,
+                               option_ranking: Any = None) -> dict:
     """Build the evidence-only document from `evidence`, store it as v1 with
     its figures and return the `ReportMeta` fields plus `document`. The one
     builder behind `POST /{name}/reports` and the no-LLM `Generate report`."""
@@ -569,7 +570,9 @@ def store_evidence_only_report(project: AuthorizedProject, evidence: Evidence,
     title = (title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
     doc = evidence_only_document(evidence, title=title,
                                  report_id=store.new_report_id(),
-                                 figure_pngs=figure_pngs)
+                                 figure_pngs=figure_pngs, option_ranking=option_ranking)
+    if option_ranking is not None:
+        doc = doc.model_copy(update={"variant": option_ranking.meta()})
     try:
         meta = store.create_report(project.directory, doc)
         for figure_id, png in figure_pngs.items():

@@ -3,7 +3,7 @@
 
 # 19 Report variants: top N by NPV, greatest IRR, one per participant (K9 / C4)
 
-Status: ready-for-agent; audit 2026-11-28: nothing built on master; option 1 (top N by NPV, greatest IRR) is unblocked, per-participant waits for site-commercial-ux/04
+Status: ready-for-agent; option 1 (top N by NPV, greatest IRR) built on branch claude/report-variants-npv-irr (PR open); left: per-participant variant (waits for site-commercial-ux/04), and the chat report tool taking a `variant` (route `GET /api/projects/{name}/report-variants` has no chat tool yet)
 Owner: BC19-NPV-1.
 Blocked by: none for option 1 (BC19-NPV-1); the per-participant variant waits for `site-commercial-ux/04` (party board, still ready-for-agent and unbuilt)
 Design: `.scratch/project-workflow/commercial-finance.md` §7 row K9; design.md:317.

@@ -259,6 +259,60 @@ def _refuse_outside_mvp1(settings: StudySettingsPatch | None) -> None:
             "subsidy."))
 
 
+def _variant_error(exc) -> HTTPException:
+    return HTTPException(exc.status, {"error_kind": exc.kind, "message": exc.message})
+
+
+def ranking_for_study(project: AuthorizedProject, study_id: str, db: DBSession,
+                      variant: str, n: int | None):
+    """The option ranking of a stored study report (business-case 19): the study's own
+    figures, refused when the compare is stale (409 ``option_compare_stale``)."""
+    from services.study import option_ranking as OR
+
+    try:
+        OR.check_request(variant, n)
+    except OR.VariantError as exc:
+        raise _variant_error(exc) from None
+    study, report, cases, _ledger, _cash = _report_record(project, study_id)
+    reasons = _report_stale(report, study, project, db)
+    if reasons:
+        raise HTTPException(409, {
+            "error_kind": "option_compare_stale",
+            "message": "The option compare is out of date. Rerun it before ranking the options.",
+            "stale_reasons": list(reasons)})
+    try:
+        ranking = OR.rank(OR.option_figures(report, cases), variant, n)
+    except OR.VariantError as exc:
+        raise _variant_error(exc) from None
+    from dataclasses import replace
+    return replace(ranking, study_id=study_id)
+
+
+def report_variants(project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db)) -> dict:
+    """What the Reports dialog may offer: the newest study with an assembled report, how many
+    of its options carry an NPV or an IRR, and whether its compare is stale."""
+    from services.study import option_ranking as OR
+
+    out: dict = {"study_id": None, "rankable_npv": 0, "rankable_irr": 0,
+                 "stale": False, "stale_reasons": []}
+    if not decision_studies_enabled():
+        return out
+    for study in sorted(store.list_studies(_project_dir(project)),
+                        key=lambda s: s.updated_at, reverse=True):
+        try:
+            _study, report, cases, _l, _c = _report_record(project, study.study_id)
+        except HTTPException:
+            continue
+        figs = OR.option_figures(report, cases)
+        reasons = _report_stale(report, _study, project, db)
+        return {"study_id": study.study_id,
+                "rankable_npv": sum(f["npv"] is not None for f in figs),
+                "rankable_irr": sum(f["irr"] is not None for f in figs),
+                "stale": bool(reasons), "stale_reasons": list(reasons)}
+    return out
+
+
 @router.get("/")
 def list_studies(project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
     _refuse_unless_enabled()

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Generate report offers the variants "Top 3 by NPV" and "Greatest IRR" over the compared options of a decision study. The report gets an "Option ranking" section that names its rule and lists the options with the compare view's NPV and IRR; options without an IRR are listed last and not ranked.

@@ -179,6 +179,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
                        strict: bool = False,
                        summaries: dict[str, list[str]] | None = None,
                        run_binding: tuple[pathlib.Path, str] | None = None,
+                       option_ranking: Any = None,
                        user_id: Any = None, project_id: Any = None) -> ReportJob:
     """
     Everything `run_report_job` needs, validated, with the record it will
@@ -194,7 +195,9 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         report_id = store.new_report_id()
         document = evidence_only_document(
             evidence, title=(title or "").strip() or f"{DEFAULT_TITLE} — {project_name}",
-            report_id=report_id, figure_pngs=figure_pngs)
+            report_id=report_id, figure_pngs=figure_pngs, option_ranking=option_ranking)
+        if option_ranking is not None:
+            document = document.model_copy(update={"variant": option_ranking.meta()})
         if template_file_id is not None:
             document = document.model_copy(update={"template_file_id": template_file_id})
     document = declare_summaries(document, summaries)
@@ -227,6 +230,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         "stop_event": None,
         "profile_id": profile_id,
         "model": model,
+        "variant": document.variant,
     }
     job = ReportJob(
         project_name=project_name, project_dir=pathlib.Path(project_dir),
@@ -1041,6 +1045,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
                      strict: bool = False,
                      summaries: dict[str, list[str]] | None = None,
                      run_binding: tuple[pathlib.Path, str] | None = None,
+                     option_ranking: Any = None,
                      user_id: Any = None, project_id: Any = None,
                      lock: threading.Lock, state: dict[str, Any]) -> str:
     """
@@ -1056,7 +1061,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
             instruction=instruction, base_document=base_document,
             regenerate_section=regenerate_section, title=title,
             template_file_id=template_file_id, meta_updates=meta_updates, strict=strict,
-            summaries=summaries, run_binding=run_binding,
+            summaries=summaries, run_binding=run_binding, option_ranking=option_ranking,
             user_id=user_id, project_id=project_id),
         run=run_report_job, lock=lock, state=state)
 

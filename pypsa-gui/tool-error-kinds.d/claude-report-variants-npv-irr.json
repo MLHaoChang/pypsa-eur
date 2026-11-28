@@ -1,0 +1,5 @@
+{"kinds": {
+  "report_variant_invalid": {"surface": "inline", "why": "The report variant request is not valid: an unknown variant, an n outside 1..10, or an n or study_id without a variant. Nothing ran; the request is corrected."},
+  "report_variant_too_few_options": {"surface": "inline", "why": "Fewer than 2 options have the NPV or IRR a report variant ranks by; the message names the options left out. Nothing ran."},
+  "option_compare_stale": {"surface": "inline", "why": "The option compare is out of date, so a report variant would rank stale figures. Nothing ran; the compare is rerun first."}
+}}

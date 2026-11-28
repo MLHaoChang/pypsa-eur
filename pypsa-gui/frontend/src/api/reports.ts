@@ -173,6 +173,25 @@ export interface GenerateReportOptions {
   instruction?: string
   /** A `report_template` upload the new report is bound to (WP11). */
   template_file_id?: string
+  /** Business-case 19: a report variant over the newest compared study (`n` only with `top_npv`). */
+  variant?: ReportVariant
+  n?: number
+}
+
+export type ReportVariant = 'top_npv' | 'greatest_irr'
+
+/** `GET /{name}/report-variants` — what Generate report may offer as a variant. */
+export interface ReportVariantsInfo {
+  study_id: string | null
+  rankable_npv: number
+  rankable_irr: number
+  stale: boolean
+  stale_reasons: string[]
+}
+
+export async function getReportVariants(projectName: string): Promise<ReportVariantsInfo> {
+  const resp = await fetch(`/api/projects/${encodeURIComponent(projectName)}/report-variants`)
+  return _json<ReportVariantsInfo>(resp)
 }
 
 export interface RegenerateSectionOptions {
@@ -643,6 +662,10 @@ export async function generateReport(
   if (opts.sections && opts.sections.length > 0) body.sections = opts.sections
   if (opts.instruction != null && opts.instruction.trim()) body.instruction = opts.instruction.trim()
   if (opts.template_file_id) body.template_file_id = opts.template_file_id
+  if (opts.variant) {
+    body.variant = opts.variant
+    if (opts.variant === 'top_npv' && opts.n != null) body.n = opts.n
+  }
   return _json<GenerateReportResponse>(await _postJson(`${base(projectName)}/generate`, body))
 }
 
