@@ -25,6 +25,7 @@ import { useInScope } from '../../../components/flowScope/useFlowScope'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
 export function GoalCard() {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const { project, running, voll, vollMissing } = useGoalStudy()
   const liveStudy = useLiveStudyRunning()
   const { goal, save } = useReliabilityGoal()
@@ -70,7 +71,7 @@ export function GoalCard() {
         <ScopeGate card="reliability" option="goal_study" testId="hub-goal-out-of-scope">{null}</ScopeGate>
       )}
       {reliabilityOn && <ReliabilityGoalEditor mode="guided" goal={goal} edits={edits}
-        onChange={setEdits} disabled={running || !goal}
+        onChange={setEdits} disabled={running || !goal || viewerReadOnly}
         fields={advanced ? ['target_lole_h', 'ens_cap_permyriad', 'mc_draws'] : ['target_lole_h']} />}
       {/* With no goal and no assumed one the field reads "not set", as Expert
           does; a typical value is only suggested here, never shown as a default. */}
@@ -89,11 +90,11 @@ export function GoalCard() {
         </button>
       </div>}
       {co2Limit !== undefined && (
-        <Co2LimitField mode="guided" co2Limit={co2Limit} edits={edits} onChange={setEdits} disabled={running} />
+        <Co2LimitField mode="guided" co2Limit={co2Limit} edits={edits} onChange={setEdits} disabled={running || viewerReadOnly} />
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="hub-goal-save" onClick={saveGoal}
-          disabled={!edited || editError !== null || save.isPending || running}
+          disabled={!edited || editError !== null || save.isPending || running || viewerReadOnly}
           className="rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {save.isPending ? 'Saving…' : 'Save goal'}
         </button>

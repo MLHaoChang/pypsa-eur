@@ -58,6 +58,7 @@ export function plainProvenance(text: string): string {
 }
 
 export function StartCard() {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const project = useUIStore(s => s.currentProject)
   const requestWorkbookImport = useUIStore(s => s.requestWorkbookImport)
   const setStep = useHubDesignStore(s => s.setStep)
@@ -112,7 +113,7 @@ export function StartCard() {
                   <button type="button" data-testid={`hub-start-template-${t.id}`}
                     aria-expanded={hasForm ? dcForm === t.id : undefined}
                     onClick={() => (hasForm ? setDcForm(dcForm === t.id ? null : t.id) : create.mutate(t.id))}
-                    disabled={create.isPending || running}
+                    disabled={create.isPending || running || viewerReadOnly}
                     title={running ? STUDY_RUNNING_SWITCH
                       : hasForm ? `Set up the ${t.name} example` : `Create a new project from the ${t.name} example`}
                     className={`flex flex-col gap-1 rounded-lg border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50
@@ -146,7 +147,7 @@ export function StartCard() {
             </button>
             {/* Excel input workbook (S3): the dialog previews before it creates, and opens the new project. */}
             <button type="button" data-testid="hub-start-workbook"
-              onClick={() => requestWorkbookImport()} disabled={running}
+              onClick={() => requestWorkbookImport()} disabled={running || viewerReadOnly}
               className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
               <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
                 <FileSpreadsheet size={12} className="text-accent" /> {START_TILE_TITLE}
@@ -180,6 +181,7 @@ export function StartCard() {
 
 /** "Is this investment worth it?": the decision-study questions (U3). */
 function InvestQuestions({ project }: { project: string | null }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const { reason, ready, start } = useDecisionEntry(project)
   return (
     <section data-testid="hub-start-invest" aria-labelledby="hub-start-invest-h"
@@ -193,7 +195,7 @@ function InvestQuestions({ project }: { project: string | null }) {
       <div className="grid gap-2 sm:grid-cols-3">
         {GUIDED_QUESTIONS.map(q => (
           <button key={q.id} type="button" data-testid={`hub-start-question-${q.id}`}
-            onClick={() => start(q)} disabled={!ready}
+            onClick={() => start(q)} disabled={!ready || viewerReadOnly}
             title={reason ?? `Start the study: ${q.title}`}
             className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
             <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">

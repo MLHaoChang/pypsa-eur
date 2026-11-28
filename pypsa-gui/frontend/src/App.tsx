@@ -415,6 +415,19 @@ export default function App() {
     return () => { stopLockHeartbeat() }
   }, [])
 
+  // A reload keeps the server-side active project, so nothing re-activates it
+  // and the viewer role would go unnoticed: read the caller's access from the
+  // project list whenever the current project changes.
+  useEffect(() => {
+    if (!authEnabled || !currentProject) return
+    let cancelled = false
+    projectsApi.list().then(ps => {
+      const p = ps.find(x => x.id === currentProject || x.name === currentProject)
+      if (p && !cancelled) useUIStore.getState().setProjectAccess(p)
+    }).catch(() => { /* the activate/load response also reports it */ })
+    return () => { cancelled = true }
+  }, [currentProject])
+
   // Simulation reconnect: on mount, ask the backend whether a solve is in
   // flight. If yes, restore the in-memory store to `status='running'` and
   // open an SSE stream — the backend replays the ring-buffer of historical

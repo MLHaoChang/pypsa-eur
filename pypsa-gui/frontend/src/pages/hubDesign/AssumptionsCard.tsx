@@ -86,6 +86,7 @@ function AssumedRow({ item }: { item: FlowItem }) {
 /** `waiting`: the section's state waits only on these defaults. Collapsed or
  *  open, "Keep all defaults" sends the same rows (guided-results 03, GK (5)). */
 export function AssumptionsCard({ items, waiting = false }: { items: FlowItem[]; waiting?: boolean }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const project = useUIStore(s => s.currentProject)
   const [open, setOpen] = useState(readOpen)
   const toggle = () => { setOpen(!open); writeOpen(!open) }
@@ -113,7 +114,7 @@ export function AssumptionsCard({ items, waiting = false }: { items: FlowItem[];
           </button>
         </h3>
         <button type="button" data-testid="assumptions-accept-all"
-          disabled={!project || accept.isPending}
+          disabled={!project || accept.isPending || viewerReadOnly}
           onClick={() => accept.mutate()}
           className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-accent hover:border-accent disabled:opacity-50">
           <CheckCircle2 size={12} /> {KEEP_ALL_DEFAULTS}

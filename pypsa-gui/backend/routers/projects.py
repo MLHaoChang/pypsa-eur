@@ -1130,7 +1130,7 @@ def list_projects(
     # `_project_info_db` already does per row.
     return [
         _project_info_db(db, p).model_copy(
-            update={"my_access": project_acl.project_role(db, user, p)}
+            update=project_acl.access_fields(db, user, p)
         )
         for p in projects
     ]
@@ -4024,7 +4024,7 @@ def activate_project(
         library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
             "library_issues": library_issues,
-            "my_access": project_acl.project_role(db, user, project)}
+            **project_acl.access_fields(db, user, project)}
 
 
 @router.post("/{project_id}/lock")
@@ -4368,7 +4368,7 @@ def load_project(
         **summary.model_dump(),
         "lock": lock_info,
         "library_issues": library_issues,
-        "my_access": project_acl.project_role(db, user, project),
+        **project_acl.access_fields(db, user, project),
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
     }
 

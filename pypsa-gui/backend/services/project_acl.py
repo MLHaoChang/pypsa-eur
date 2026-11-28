@@ -245,3 +245,24 @@ def ensure_project_access(db: DBSession, user: User, project: Project) -> Projec
     if not can_access_project(db, user, project):
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+def access_fields(db: DBSession, user: User, project: Project) -> dict[str, object]:
+    """The access facts a project response carries beside the project.
+
+    `my_access` is the caller's role, `can_manage_members` says whether the
+    Share dialog may save, and `owner_email` names who to ask for edit access
+    (project-viewer-role 05). One place, so the three responses cannot drift.
+    """
+    return {
+        "my_access": project_role(db, user, project),
+        "can_manage_members": can_manage_membership(db, user, project),
+        "owner_email": owner_email(db, project),
+    }
+
+
+def owner_email(db: DBSession, project: Project) -> str | None:
+    """Email of the person who created the project's tree root: who to ask for edit access."""
+    root = resolve_tree_root(db, project)
+    creator = db.get(User, root.created_by) if root.created_by is not None else None
+    return creator.email if creator is not None else None

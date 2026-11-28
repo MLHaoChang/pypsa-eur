@@ -18,7 +18,7 @@ export interface LockInfo {
 // WHY a project can be read-only. `readOnly` alone could only ever produce one
 // message — "another user is editing this project" — which is a lie the moment
 // a queue job is what is holding it.
-export type ReadOnlyReason = 'writable' | 'locked-by-user' | 'solving'
+export type ReadOnlyReason = 'writable' | 'locked-by-user' | 'solving' | 'viewer'
 
 export interface LockState {
   // True when the current user may NOT mutate the active project — either
@@ -77,7 +77,10 @@ export function lockStateFromAcquire(outcome: LockAcquireOutcome): LockState {
 export function effectiveLockState(
   lockReadOnly: boolean,
   solving: boolean,
+  viewer = false,
 ): { readOnly: boolean; reason: ReadOnlyReason } {
+  // A viewer wins the message: it is the one cause that waiting never clears.
+  if (viewer) return { readOnly: true, reason: 'viewer' }
   if (solving) return { readOnly: true, reason: 'solving' }
   if (lockReadOnly) return { readOnly: true, reason: 'locked-by-user' }
   return { readOnly: false, reason: 'writable' }

@@ -76,6 +76,7 @@ export function backupFromText(label: string, text: string): { value: number } |
 function BackupEditor({ name, config, revision, reload }: {
   name: string; config: IslandConfig; revision: string | null | undefined; reload: () => void
 }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const req = config.requirements
   const tagged = (f: IslandRequirementNumber) => req[f] as Tagged | undefined
   const [open, setOpen] = useState(false)
@@ -111,7 +112,7 @@ function BackupEditor({ name, config, revision, reload }: {
           {errors.map(e => <p key={e} role="alert" className="text-[10px] text-danger">{e}</p>)}
           <div className="flex items-center gap-2">
             <button type="button" data-testid="island-backup-save" className={SAVE}
-              disabled={errors.length > 0 || Object.keys(changes).length === 0 || save.isPending}
+              disabled={errors.length > 0 || Object.keys(changes).length === 0 || save.isPending || viewerReadOnly}
               onClick={() => save.mutate(changes)}>Save</button>
             <button type="button" className={BTN}
               onClick={() => { setOpen(false); setText({}); save.reset() }}>Cancel</button>

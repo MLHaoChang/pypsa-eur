@@ -3,7 +3,7 @@
 
 # 05 Sharing and the viewer role in the UI: role picker, read-only hints, Members only for those who manage
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01 (PR 2a #1718: member role route and `my_access`)
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W4 (shots `members`, `member_save`, `workspace`).
 Model: sonnet. Review: UX + GK B.

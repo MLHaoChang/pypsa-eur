@@ -122,6 +122,8 @@ def _require_role(snapshot, tier):
     # A viewer's write is refused whatever personal rule is saved: a saved
     # 'standard' rule never loosens the role (project-viewer-role 01).
     if not role_admits(snapshot, tier):
+        # Unnamed on purpose: a tool refusal goes to the model provider, and the
+        # owner's email must not (the HTTP 403 and the GUI banner may name it).
         raise project_write_gate.refusal()
 
 

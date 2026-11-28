@@ -720,6 +720,10 @@ export interface ImportSummary {
 }
 export interface ProjectInfo {
   id?: string | null
+  // The caller's access and who owns it (viewer role): 'edit' | 'view'.
+  my_access?: string | null
+  can_manage_members?: boolean | null
+  owner_email?: string | null
   name: string; created_at: string; has_solver_config: boolean
   bus_count: number; snapshot_count: number; objective: number | null
   // A finished Guided (Energy Hub) study was saved with the project (issue 23).

@@ -23,6 +23,7 @@ export const RELIABILITY_OUT_OF_SCOPE =
   'Outside scope: add Reliability goal & study (below) to run the study.'
 
 export function GoalStudyRun() {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const gate = useRunGate('all')
   const solveGate = useRunGate('optimisation')
   const {
@@ -58,7 +59,7 @@ export function GoalStudyRun() {
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="hub-run-start"
           onClick={() => run.mutate()}
-          disabled={running || run.isPending || built.body === null || vollMissing || !project
+          disabled={viewerReadOnly || running || run.isPending || built.body === null || vollMissing || !project
             || templateUnknown || gate.blocked || !reliabilityOn}
           title={templateUnknown ? 'The template could not be read: retry below.'
             : !reliabilityOn ? outOfScopeTitle : undefined}
@@ -114,6 +115,7 @@ export function GoalStudyRun() {
 function OptimisationRun({ blocked, reason, hasProject }: {
   blocked: boolean; reason: string | null; hasProject: boolean
 }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const requestRunSolve = useUIStore(s => s.requestRunSolve)
   const status = useSimulationStore(s => s.status)
   const setStep = useHubDesignStore(s => s.setStep)
@@ -122,7 +124,7 @@ function OptimisationRun({ blocked, reason, hasProject }: {
   return (
     <div data-testid="hub-run" className="flex flex-col gap-2">
       <button type="button" data-testid="hub-run-solve" onClick={() => requestRunSolve()}
-        disabled={!hasProject || blocked || running}
+        disabled={!hasProject || blocked || running || viewerReadOnly}
         className="inline-flex items-center gap-1.5 self-start rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
         {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
         {running ? 'Running…' : status === 'idle' ? 'Run the optimisation' : 'Run the optimisation again'}

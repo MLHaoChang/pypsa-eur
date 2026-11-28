@@ -318,3 +318,110 @@ def test_the_same_user_twice_in_roles_is_400(world, client):
     response = client.put(f"/api/projects/{world['project']}/members", json=body)
     assert response.status_code == 400, response.text
     assert _stored(world, world["viewer"]) == "viewer"
+
+
+def test_share_facts_follow_the_role(world, as_user):
+    """`can_manage_members` and `owner_email` ride with `my_access` (05)."""
+    viewer = as_user(world["viewer"]).get(f"/api/projects/{world['project']}")
+    assert viewer.status_code == 200, viewer.text
+    body = viewer.json()
+    assert body["can_manage_members"] is False
+    assert body["owner_email"]
+
+
+def test_refusal_cause_sentence_matches_the_frontend_wording():
+    """The viewer line the GUI builds and the refusal share one cause sentence."""
+    import pathlib
+
+    from services.project_write_gate import MESSAGE
+
+    src = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "frontend/src/utils/viewerAccess.ts"
+    ).read_text()
+    assert MESSAGE.split(". ")[0] + "." in src
+    assert MESSAGE == "You can view this project. Ask its owner for edit access."
+
+
+def test_refusal_names_the_owner_like_the_banner():
+    from services.project_write_gate import MESSAGE, refusal
+
+    named = refusal("o@x.com").detail["message"]
+    assert named == "You can view this project. Ask o@x.com for edit access."
+    assert refusal().detail["message"] == MESSAGE
+
+
+# ── 05 B1: can_manage_members and owner_email for every kind of caller ───────
+
+
+def _facts(world, user_id, project_id=None):
+    from db.models import Project, User
+    from services import project_acl
+
+    with world["session_local"]() as db:
+        project = db.get(Project, uuid.UUID(str(project_id or world["project"])))
+        return project_acl.access_fields(db, db.get(User, user_id), project)
+
+
+def _add_child(world, creator_id):
+    from datetime import UTC, datetime
+
+    from db.models import Project
+
+    child_id = uuid.uuid4()
+    with world["session_local"]() as db:
+        root = db.get(Project, uuid.UUID(str(world["project"])))
+        db.add(
+            Project(
+                id=child_id,
+                org_id=root.org_id,
+                name=f"child-{child_id.hex[:8]}",
+                created_by=creator_id,
+                storage_path=f"child-{child_id.hex}",
+                parent_project_id=root.id,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+    return child_id
+
+
+def test_can_manage_members_for_every_role(world, seeded_identity):
+    from db.models import Project
+
+    admin = uuid.UUID(str(seeded_identity["user_id"]))
+    # Org admin who created the root: may manage; viewer, editor may not.
+    got = _facts(world, admin)
+    assert got["can_manage_members"] is True and got["my_access"] == "edit"
+    assert _facts(world, world["editor"])["can_manage_members"] is False
+    assert _facts(world, world["viewer"])["can_manage_members"] is False
+
+    # A non-admin who is the root creator may manage (the members route's rule).
+    creator = _member(world["session_local"], _org_of(world))
+    with world["session_local"]() as db:
+        db.get(Project, uuid.UUID(str(world["project"]))).created_by = creator
+        db.commit()
+    got = _facts(world, creator)
+    assert got["can_manage_members"] is True and got["my_access"] == "edit"
+    # The admin is still an org admin, so still manages; a lineage creator
+    # (made a child, not the root) edits but may not manage.
+    assert _facts(world, admin)["can_manage_members"] is True
+    lineage = _member(world["session_local"], _org_of(world))
+    child = _add_child(world, lineage)
+    got = _facts(world, lineage, child)
+    assert got["my_access"] == "edit" and got["can_manage_members"] is False
+
+
+def test_owner_email_is_the_root_creators_even_on_a_child(world, seeded_identity):
+    from db.models import Project, User
+
+    creator = _member(world["session_local"], _org_of(world))
+    with world["session_local"]() as db:
+        db.get(Project, uuid.UUID(str(world["project"]))).created_by = creator
+        creator_email = db.get(User, creator).email
+        db.commit()
+    other = _member(world["session_local"], _org_of(world))
+    child = _add_child(world, other)
+    assert _facts(world, world["viewer"])["owner_email"] == creator_email
+    assert _facts(world, world["viewer"], child)["owner_email"] == creator_email

@@ -3,7 +3,7 @@
 
 # A read-only project viewer role
 
-Status: ready-for-agent; audit 2026-11-28: PR 1 backend merged (#1622), PR 2a backend merged (#1718, 2026-11-21); left: the UI sweep (2b/2c), tracked in `05-viewer-and-sharing-ui.md`
+Status: done; PR 1 backend merged (#1622), PR 2a merged (#1718), UI sweep shipped by 05
 Type: task
 Source: owner decisions LC48C-ROLE-1 (2026-11-14), VIEWER-ROLE-1 (2026-11-17, build it now), from LC-48c (`.scratch/live-copilot/issues/48c-undo-rebind-viewer-rows.md`)
 

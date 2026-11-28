@@ -5,6 +5,7 @@
 // example's default, so Create works unedited. A refusal (422 dc_load_invalid)
 // sits beside its field and opens with the field label.
 import { useState } from 'react'
+import { useUIStore } from '../../../store/uiStore'
 import { dcLoadRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
   ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL, STAGED_BESS_LINE,
@@ -28,6 +29,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   disabledReason: string | null
   onCancel: () => void
 }) {
+  const viewerReadOnly = useUIStore(s => s.readOnly && s.readOnlyReason === 'viewer')
   const staged = templateId === 'eh_datacenter_staged'
   const [draft, setDraft] = useState<DcDraft>(() => initialDcDraft(staged))
   const [server, setServer] = useState<{ field: DcField | null; text: string } | null>(null)
@@ -214,7 +216,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
       )}
       {disabledReason && <p data-testid="dc-form-disabled-reason" className="text-[11px] text-warn">{disabledReason}</p>}
       <div className="flex items-center gap-2">
-        <button type="submit" data-testid="dc-form-create" disabled={create.isPending || !!disabledReason || nErrors > 0}
+        <button type="submit" data-testid="dc-form-create" disabled={create.isPending || !!disabledReason || nErrors > 0 || viewerReadOnly}
           className="rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {create.isPending ? 'Creating…' : 'Create project'}
         </button>

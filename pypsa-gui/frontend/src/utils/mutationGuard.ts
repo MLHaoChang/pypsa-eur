@@ -9,6 +9,7 @@
 // so it runs under the vitest `node` env and unit-documents the rule.
 
 import { canMutate, type ReadOnlyReason } from './lockState'
+import { VIEWER_MUTATION_MESSAGE, viewerBannerMessage } from './viewerAccess'
 
 // One canonical message per reason so every blocked mutation reads identically
 // AND honestly. The single hardcoded "another user is editing this project" was
@@ -25,6 +26,7 @@ const MESSAGE_BY_REASON: Record<ReadOnlyReason, string | null> = {
   writable: null,
   'locked-by-user': READ_ONLY_MUTATION_MESSAGE,
   solving: SOLVING_MUTATION_MESSAGE,
+  viewer: VIEWER_MUTATION_MESSAGE,
 }
 
 export interface MutationVerdict {
@@ -86,7 +88,9 @@ export const RUN_READ_ONLY_LINE = 'Being solved: edits open again when the run e
 export function readOnlyBannerMessage(
   reason: ReadOnlyReason,
   holderEmail: string | null = null,
+  ownerEmail: string | null = null,
 ): string | null {
+  if (reason === 'viewer') return viewerBannerMessage(ownerEmail)
   if (reason === 'solving') {
     return 'This project is solving in the queue — your changes are disabled until the solve finishes.'
   }
