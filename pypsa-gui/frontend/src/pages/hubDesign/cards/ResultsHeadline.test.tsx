@@ -374,3 +374,20 @@ describe('Results headline: the CO₂ limit', () => {
     expect(useUIStore.getState().flowReturn?.label).toBe('Results')
   })
 })
+
+describe('LCOE caveat (te-24, LCOE-CAVEAT-1)', () => {
+  const CAVEAT = 'Above €\u00a0300/MWh, high for a hospital: the figure includes the cost of the backup kept for the critical load.'
+  it('shows the server\'s caveat, muted, under a figure above the bound', async () => {
+    vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(withLcoe({ ...LCOE_READY, value: 413, caveat: CAVEAT }))
+    mount()
+    const line = await screen.findByTestId('hub-results-lcoe-caveat')
+    expect(line.textContent).toBe(CAVEAT)
+    expect(line.className).toContain('text-muted')
+    expect(screen.getByTestId('hub-results-lcoe').querySelector('[data-kpi-value]')).not.toBeNull()
+  })
+  it('shows no caveat line when the card has none', async () => {
+    mount()
+    await screen.findByTestId('hub-results-lcoe')
+    expect(screen.queryByTestId('hub-results-lcoe-caveat')).toBeNull()
+  })
+})

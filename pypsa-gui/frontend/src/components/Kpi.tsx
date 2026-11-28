@@ -33,7 +33,7 @@ const TONE: Record<KpiTone, string> = {
 
 export default function Kpi({
   label, lead, value, unit, basis, hint, delta, deltaTone, headline, testId,
-  state = 'ready', reason, action, link, fromStudy, valueLabel, dimmed, trend,
+  state = 'ready', reason, action, link, fromStudy, valueLabel, dimmed, trend, caveat,
 }: {
   label: string
   /** A plain lead line above the label, e.g. Guided's "What the design is worth" over the NPV's name. */
@@ -62,6 +62,9 @@ export default function Kpi({
   dimmed?: boolean
   /** A small trend under the figure (the headline strip's periods); shown with the figure only. */
   trend?: ReactNode
+  /** One muted sentence about a valid figure, e.g. that it is high for the site (te-24); shown
+   *  with the figure only, never warn-coloured (the value is not wrong). */
+  caveat?: string | null
 }) {
   const raw = unit !== undefined ? { value, unit } : splitValueUnit(value)
   const parts = kpiFigure(raw.value, raw.unit)
@@ -104,6 +107,9 @@ export default function Kpi({
       {trend && showsFigure && <div className={state === 'stale' || dimmed ? 'opacity-60' : undefined}>{trend}</div>}
       {reason && state !== 'ready' && state !== 'zero' && (
         <div className="text-[11.5px] leading-snug text-muted">{reason}</div>
+      )}
+      {caveat && showsFigure && (
+        <div data-testid={testId ? `${testId}-caveat` : undefined} className="text-[11px] leading-snug text-muted">{caveat}</div>
       )}
       {basis && showsFigure && <div className="mt-auto text-[11px] leading-snug text-muted">{basis}</div>}
       {action && state !== 'ready' && state !== 'zero' && (
