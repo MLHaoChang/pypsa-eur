@@ -1444,6 +1444,9 @@ export interface HeadlineCard {
   money_year?: number | null
   /** LCOE card only: its basis line, e.g. "investment case · real basis, 2024 EUR". */
   basis?: string
+  /** LCOE card only (te-24, LCOE-CAVEAT-1): one sentence when the figure is above the owner's
+   *  bound, e.g. "Above € 300/MWh, high for a hospital: …"; null at or below it. */
+  caveat?: string | null
   /**
    * This case minus its base case, in the card's unit (`?compare=1` only).
    * `pct` is null over a zero base; `value` is null, with `note` saying why,

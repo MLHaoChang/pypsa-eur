@@ -89,6 +89,14 @@ describe('Grid code & connection', () => {
     expect(useUIStore.getState().fieldDrawer?.panel).toBe('campusStudy')
   })
 
+  it('the Run-the-grid-checks link leaves a Back pill to Grid code & connection', async () => {
+    useUIStore.setState({ uiMode: 'expert', flowReturn: null } as never)
+    api.campusState.mockResolvedValue(hubState(false))
+    mount(<GridCodeTab />)
+    fireEvent.click(await screen.findByText('Run the grid checks in Grid study ›'))
+    expect(useUIStore.getState().flowReturn?.label).toBe('Grid code & connection')
+  })
+
   it('in Expert, the scorecard link opens Issues and asks to scroll to the group', async () => {
     useUIStore.setState({ uiMode: 'expert', gridReadinessRequest: false } as never)
     api.campusState.mockResolvedValue(hubState(false))

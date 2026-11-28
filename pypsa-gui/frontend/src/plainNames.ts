@@ -75,3 +75,15 @@ export const islandScenarioLabel = (id: string): string => ISLAND_SCENARIO_LABEL
 /** A Library series for a picker: `ipp_da_base`, v1 → `Ipp da base (version 1)`. */
 export const librarySeriesLabel = (id: string, version: number): string =>
   `${sentenceCase(id)} (version ${version})`
+
+const EH_ROLE_LABELS: Record<string, string> = {
+  grid_import: 'Grid import',
+  eh_import: 'Grid import (Energy Hub)',
+  import: 'Import',
+  eh_conversion: 'Conversion (Energy Hub)',
+  conversion: 'Conversion',
+  electrolyser: 'Electrolyser',
+  fuel_cell: 'Fuel cell',
+}
+/** An Energy Hub Link role id in words; the id itself stays what the backend stores. */
+export const ehRoleLabel = (id: string): string => EH_ROLE_LABELS[id] ?? sentenceCase(id)

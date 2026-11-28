@@ -7,7 +7,8 @@
 // carry `hub-rail-section-*` ids.
 import { useEffect, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
-import { FlowStateDot } from '../../components/FlowStateDot'
+import { FlowStateDot, RUN_IN_PROGRESS } from '../../components/FlowStateDot'
+import { useProjectRun } from '../../hooks/useProjectRun'
 import { ScopeChips, useScopeChips } from '../../components/flowScope/ScopeChips'
 import { countOpen, countWords } from '../../utils/flowItems'
 import type { FlowSectionId, FlowSectionState } from '../../api/flow'
@@ -65,7 +66,10 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
             : 'border-border text-muted hover:border-accent hover:text-accent'
   const stateless = id === 'readiness' || id === 'results'
   const counts = countWords(countOpen(flowSection?.items ?? []))
-  const stateWord = stateless ? null : isError || !flowSection ? FLOW_STATE_WORDS.unknown
+  // A run holds the network: the flow is not read until it ends, which says
+  // "run in progress", not "not known yet" (template-e2e 25).
+  const running = useProjectRun() != null && (isError || (flowSection?.state ?? 'unknown') === 'unknown')
+  const stateWord = stateless ? null : running ? RUN_IN_PROGRESS : isError || !flowSection ? FLOW_STATE_WORDS.unknown
     : counts || FLOW_STATE_WORDS[state ?? 'unknown']
   // The cards in scope whose blocks this section holds (W4a chips).
   const chips = useScopeChips(id)
@@ -85,8 +89,8 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
             current pill and in every pill's title and accessible name. */}
         <span className={bs === 'current' ? '' : 'hidden min-[1600px]:inline'}>{meta.label}</span>
         {bs === 'current' && <span className="hidden min-[1600px]:contents"><ScopeChips section={id} testId="hub-rail-scope-chips" /></span>}
-        {!stateless && bs !== 'blocked' && <FlowStateDot state={isError ? null : state} />}
-        {id === 'scenarios' && props.flow === 'running' && (
+        {!stateless && bs !== 'blocked' && <FlowStateDot state={isError ? null : state} running={running} />}
+        {id === 'scenarios' && props.flow === 'running' && !running && (
           <Loader2 size={11} className="animate-spin" data-testid="hub-rail-spinner" />
         )}
       </button>

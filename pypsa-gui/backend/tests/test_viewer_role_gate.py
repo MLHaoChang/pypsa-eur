@@ -1115,3 +1115,33 @@ def test_a_project_named_as_its_own_id_is_listed_once(world):
         viewer = db.get(User, world["viewer"])
         found = project_write_gate._path_projects(db, viewer, world["project"])
         assert [p.id for p in found] == [uuid.UUID(world["project"])]
+
+
+def test_a_viewer_reads_and_downloads_the_powerfactory_bundles(
+    world, as_user, monkeypatch
+):
+    """The PowerFactory (DGS) listing and download are reads: a viewer gets them."""
+    from services import campus_electrical_service as ce
+
+    monkeypatch.setattr(
+        ce,
+        "powerfactory_bundles",
+        lambda *a: {
+            "has_run": True,
+            "has_powerfactory": True,
+            "stale": False,
+            "run_at": None,
+            "bundles": [],
+            "skipped": None,
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        ce, "powerfactory_bundle_zip", lambda project, name: (b"PK", False)
+    )
+    viewer = as_user(world["viewer"])
+    base = f"/api/campus-electrical/{world['project']}/powerfactory"
+    listed = viewer.get(base)
+    assert listed.status_code == 200, listed.text
+    downloaded = viewer.get(f"{base}/hub_p1_h1/download")
+    assert downloaded.status_code == 200 and downloaded.content == b"PK"

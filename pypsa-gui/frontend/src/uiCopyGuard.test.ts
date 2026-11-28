@@ -280,7 +280,6 @@ const PINNED_ALLOW_KEYS = [
   'layout/PropertiesPanel.tsx|e_nom',
   'layout/PropertiesPanel.tsx|s_nom',
   'layout/PropertiesPanel.tsx|v_nom',
-  'layout/properties/cardKit.tsx|grid_import',
   'pages/SolverSettings.tsx|p_nom',
   'pages/SolverSettings.tsx|committable=',
   'pages/SolverSettings.tsx|co2_emissions',
