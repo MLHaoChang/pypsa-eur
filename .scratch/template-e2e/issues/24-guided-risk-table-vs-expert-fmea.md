@@ -3,7 +3,7 @@
 
 # 24 — Guided risk table disagrees with Expert FMEA and the report
 
-Status: ready-for-agent
+Status: done
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results: numbers must agree between Guided, Expert and report.
@@ -30,3 +30,8 @@ Checked by code reading only; the app was not re-run. Acceptance as above: Guide
 - Remains: the LCOE caveat, held until the owner sets the plausibility bound (UX 32 gate: no placeholder bound; caveat on the investment "LCOE (real)" in both modes; the cause sentence only when the site has a critical share and backup exists).
 - Follow-up (GK C1 on #2092): put a network fingerprint on the stored EH report, so that a stored report from an edited network is not served as current.
 - Known gap (named in #2092): the Guided ResultsCard "Biggest risks" list and the headline read fmeaTopRows, which holds class-B rows only.
+- 2026-11-28: the LCOE caveat lands in #2117 (owner decision LCOE-CAVEAT-1: EUR 300/MWh). With it, all three acceptance lines are met, and Status is done once #2117 merges.
+- Follow-ups (UX 33 on #2117, not blocking):
+  - Money notation: the LCOE figure reads "413.2 €/MWh" while its caveat reads "€ 300/MWh", two notations on one card.
+  - The caveat's "rarely runs" is not checked against dispatch.
+  - Investment's "Project NPV … -2,400,000.00" row (on master already) is not in money()/signFirstEuro style (ruling (ad)). AA 36 (#2090) may already cover it.
