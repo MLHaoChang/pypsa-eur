@@ -442,3 +442,16 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - In the grid_import firm-capacity cap, a branch counts as a path only if its rating in the period is > 0: s_nom × min s_max_pu for Lines and Transformers, p_nom × p_max_pu plus the direction for Links. An extendable branch counts as a path when its *_nom_max > 0 (#1998).
 - The site is the eh_critical buses when any bus is flagged. Otherwise it is the chain ends: a grid_import's bus1 that is not the bus0 of another grid_import active in the period. A Load never makes a site (#1998, #2013).
 - A wording key on a scorecard or report is emitted only where it changes the text, so unchanged reports keep their evidence hash (#2013 L1).
+
+## Standing rulings (GK B (75), recorded 2026-11-28)
+
+- A comparison's period is exact: the sealed window record plus a tolerance-free compare of the in-window timestamps and the objective weights. An unknown raw shape refuses. Equal start, end and count is not enough (AA09-S2-PERIOD-1).
+- The unit is the baseline's sealed fact unit against the current definition. A definition change after the seal reads baseline_unavailable end to end, through records.evidence re-verification. The calc-level unit, pp and allow-set guards stay as defensive code, stated as unreachable today (AA09-S2-UNIT-1).
+- COMPARISON_PROFILES has 4 entries. generator-dispatch/1 is admitted by validate and refused at calculation, and that refusal is pinned exactly (AA09-S2-ALLOW-1).
+- A per-snapshot peak counts zero-weight snapshots. Per-slot "withhold, never negative" reasons cover efficiency_above_one (link loss), unsupported_standing_loss (sl outside [0,1), withholds all) and negative_store_energy_with_losses (loss only) (AA09-PEAK-1).
+- Following PyPSA 1.1.2 define_store_constraints, a non-cyclic Store applies no standing loss to e_initial at the first snapshot. A cyclic Store applies eff to e[last] (STORE-START-1).
+- Schema fragments (FRAG-SCHEMA-1, extends the schema-fragment rule): inline constants pin `==` and in order to their real source, with a mutant each; each fragment's public upper-case names are pinned as an exact list; shared dicts are read through a call-time Mapping view; moved helpers that chat_tools re-exports need an identity test.
+- PROXIES is pinned exactly per stem, so a mis-aimed proxy fails test_tool_fragments (FRAG-PROXY-1).
+- The splice-place pin excludes only the keys of appended fragments (FRAG-APPEND-1, #2121).
+- A plan-named move slice over about 1,500 raw lines was accepted (#2109, about 2,100 lines, almost all verbatim move), because splitting would only add re-OK rounds. Noted for the owner (FRAG-SIZE-1).
+- A frontend source scan's exemption list must be exact (toEqual over the computed set), never arrayContaining (SCAN-EXACT-1, #2106 PHRASE_GAPS).
