@@ -13,6 +13,7 @@ import { useHubStudy } from '../pages/hubDesign/useHubData'
 import { finishedStudyLabel } from '../utils/runStatus'
 import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
+import { objectiveName } from '../pages/results/costBasis'
 import { useStudyAbort, STUDY_ABORT_TITLE } from '../hooks/useStudyAbort'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
@@ -54,6 +55,20 @@ export function formatObjective(v: number | null | undefined): string | null {
   if (a >= 1e6) return signFirstEuro(v, `${(a / 1e6).toFixed(2)} M`)
   if (a >= 1e3) return signFirstEuro(v, `${(a / 1e3).toFixed(0)} k`)
   return signFirstEuro(v, a.toFixed(0))
+}
+
+/** The solve toast's figure with its name and basis, in the status bar's words (template-e2e 18): read from
+ *  the solve's own record, refetched when the solve ends; until it arrives the bare figure. */
+export function SolvedObjective({ project, objective }: { project: string | null; objective: string | null }) {
+  const { data: status } = useQuery({
+    queryKey: nk(project, 'simulationStatus'),
+    queryFn: simulationApi.getStatus,
+    enabled: !!project && objective != null,
+  })
+  if (objective == null) return <span>Solved</span>
+  if (status?.objective_basis == null) return <span>Solved · {objective}</span>
+  const discounted = status.objective_discounted_to != null ? ` (discounted to ${status.objective_discounted_to})` : ''
+  return <span>Solved · {objectiveName(status)} {objective}{discounted}</span>
 }
 
 /** Open Results after a solve, on its Summary (the answer first; the Summary
@@ -754,7 +769,7 @@ export default function AppHeader() {
           const objective = formatObjective(d.objective)
           toast.success((t) => (
             <span className="flex items-center gap-2" data-testid="solve-done-toast">
-              <span>Solved{objective ? ` · ${objective}` : ''}</span>
+              <SolvedObjective project={proj} objective={objective} />
               <button
                 type="button"
                 className="underline font-medium"
@@ -866,7 +881,9 @@ export default function AppHeader() {
     return () => setSolvingReadOnly(false)
   }, [jobRunning, studyRunning, setSolvingReadOnly])
 
-  const handleRunButton = async () => {
+  // `dispatch`: run this project's dispatch solve even where the header's Run is the study (template-e2e 18:
+  // the Summary's and the out-of-date banner's "Run the solve" mean the LOPF whose figures they show).
+  const handleRunButton = async (opts?: { dispatch?: boolean }) => {
     if (studyRunning && !jobRunning && !isRunning) {
       if (!studyAborting) abortStudy.mutate()
       return
@@ -897,7 +914,7 @@ export default function AppHeader() {
       toast.error('Read-only: another user is editing this project.')
       return
     }
-    if (verdictRun) {
+    if (verdictRun && !opts?.dispatch) {
       goalStudy.run.mutate()
       return
     }
@@ -970,7 +987,7 @@ export default function AppHeader() {
       toast('A Study runs from Run study, in its Planning → dynamics panel.')
       return
     }
-    void runHandlerRef.current()
+    void runHandlerRef.current({ dispatch: useUIStore.getState().runSolveDispatch })
   }, [runSolveRequest, jobRunning, isRunning, jobQueued, isStudy])
 
   return (
@@ -1187,7 +1204,7 @@ export default function AppHeader() {
             </button>
           )}
           <button
-            onClick={handleRunButton}
+            onClick={() => { void handleRunButton() }}
             disabled={abort.isPending || studyAborting || enqueue.isPending || goalStudy.run.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'

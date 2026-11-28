@@ -22,7 +22,7 @@ afterEach(cleanup)
 describe('results 204 states', () => {
   it('204 with the header: the out-of-date sentence and the Run control', () => {
     const run = vi.fn()
-    useUIStore.setState({ requestRunSolve: run } as never)
+    useUIStore.setState({ requestDispatchSolve: run } as never)
     noteResultsResponse('/results/generators', 204, hdr('out_of_date'))
     render(<NotSolved what="Dispatch" />)
     expect(screen.getByTestId('results-out-of-date').textContent).toContain(

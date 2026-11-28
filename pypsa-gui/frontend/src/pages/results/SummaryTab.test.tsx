@@ -344,7 +344,7 @@ describe('SummaryTab source run (control-strategy 06)', () => {
     api.getEhReview.mockResolvedValue({ status: 'ok', stale: false,
       summary: { verdict: 'pass', mc_lole_h_per_year: 0, target_lole_h: 3 } })
     const run = vi.fn()
-    useUIStore.setState({ requestRunSolve: run })
+    useUIStore.setState({ requestDispatchSolve: run })
     renderTab()
     const verdict = await screen.findByTestId('summary-study-verdict')
     expect(verdict.textContent).toMatch(/^Certified/)

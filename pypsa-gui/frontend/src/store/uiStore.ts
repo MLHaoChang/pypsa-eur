@@ -575,6 +575,10 @@ interface UIStore {
    *  it changes, so there is one way to queue a solve. */
   runSolveRequest: number
   requestRunSolve: () => void
+  /** Whether the latest request asks for the dispatch solve itself, even where the header's Run is the
+   *  study (template-e2e 18: the Summary's and the out-of-date banner's "Run the solve" mean the LOPF). */
+  runSolveDispatch: boolean
+  requestDispatchSolve: () => void
   // Deep-link into a Settings section (e.g. 'assistant-model'). The
   // settings SlidePanel subtree remounts on every panel switch, so this
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
@@ -876,6 +880,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   libraryFocus: null,
   contractStart: null,
   runSolveRequest: 0,
+  runSolveDispatch: false,
   settingsSectionRequest: null,
   panelSectionRequest: null,
   reportGenerateRequest: false,
@@ -1181,7 +1186,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearLibraryFocus: () => set({ libraryFocus: null }),
   startContractFrom: (start) => set({ contractStart: start }),
   clearContractStart: () => set({ contractStart: null }),
-  requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
+  requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1, runSolveDispatch: false })),
+  requestDispatchSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1, runSolveDispatch: true })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
   requestPanelSection: (panel, section) => set({ panelSectionRequest: { panel, section } }),

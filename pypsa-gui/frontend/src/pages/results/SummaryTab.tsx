@@ -184,7 +184,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const report = useHubReport(study, false)
   const { flow } = useProjectFlow()
   const studyKind = flow?.sections.find(sec => sec.section === 'results')?.freshness_by_kind?.study
-  const requestRunSolve = useUIStore(st => st.requestRunSolve)
+  const requestDispatchSolve = useUIStore(st => st.requestDispatchSolve)
   const resultsOutOfDate = useResultsOutOfDate()
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
   const ll = (lostLoad ?? null) as LostLoadPayload | null
@@ -200,7 +200,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           <p className="text-[13px] font-semibold text-text" data-testid="summary-study-verdict">{studyHeadline(review, report)}</p>
           <SourceRunLine testId="summary-source" source="study" at={study?.finished_at ?? null}
             outOfDate={review.stale === true || study?.edited_since_study === true}
-            missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: requestRunSolve } }} />
+            missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: requestDispatchSolve } }} />
         </div>
       )
     }
