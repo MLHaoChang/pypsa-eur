@@ -1175,7 +1175,7 @@ export default function AppHeader() {
             <button type="button" data-testid="run-notes"
               onClick={() => openFlowTarget(runGate.notes[0].target)}
               title={runGate.notes.map(n => n.message).join('\n')}
-              className="text-[11px] text-muted underline-offset-2 hover:underline">
+              className="shrink-0 whitespace-nowrap text-[11px] text-muted underline-offset-2 hover:underline">
               {runGate.notes.length === 1 ? '1 note' : `${runGate.notes.length} notes`}
             </button>
           )}
@@ -1185,7 +1185,7 @@ export default function AppHeader() {
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'
               : gated
-              ? `Cannot run yet — ${gateReason}`
+              ? `Cannot run yet: ${gateReason}`
               : studyRunning && !jobRunning && !isRunning
               ? STUDY_ABORT_TITLE
               : jobRunning || isRunning
