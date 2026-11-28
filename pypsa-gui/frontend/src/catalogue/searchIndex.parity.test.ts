@@ -13,7 +13,7 @@ import { ASSET_TYPES } from '../utils/assetTypes'
 import table from '../../../backend/tests/data/catalogue_search_cases.json'
 import type { CatalogueEntry } from './api'
 
-const ENTRIES: CatalogueEntry[] = table.entries.map(e => entry(e as Partial<CatalogueEntry> & Pick<CatalogueEntry, 'id' | 'plain_name'>))
+const ENTRIES: CatalogueEntry[] = table.entries.map(e => entry(e as unknown as Partial<CatalogueEntry> & Pick<CatalogueEntry, 'id' | 'plain_name'>))
 
 interface SearchCase { query: string; ids: string[]; why: string; function?: string; asset_type?: string }
 
