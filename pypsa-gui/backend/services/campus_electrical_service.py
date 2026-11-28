@@ -736,6 +736,9 @@ def _results(run: Path):
                        if investment is not None and (run / COST_BASIS_FILE).is_file() else None),
         # DC-SURFACE-1: the harmonic impedance scan from the PCC (``_harmonic_scan_results``).
         "harmonic_scan": _harmonic_scan_results(run),
+        # Grid-compliance 29: the harmonic emission screen, with the background at the PCC
+        # (``_harmonic_emission_results``).
+        "harmonic_emission": _harmonic_emission_results(run),
         # Study harness 18: the P–V/Q–V margin at the PCC (``_voltage_stability_results``).
         "voltage_stability": _voltage_stability_results(run),
         # Plan GC-02: the voltage-control strategy (``_voltage_control_results``).
@@ -950,6 +953,7 @@ def _stale(project, d: Path) -> bool:
         Pin("campus", m.get("campus_sha256"), lambda: hashlib.sha256(text.encode()).hexdigest()),
         Pin("network", m.get("network_sha256"), lambda: _file_digest(nc)),
         *_library_pins(project, d),
+        *_background_pins(project, d),
     ])
 
 
@@ -2223,6 +2227,7 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                     {"profile": s["profile"], "sha256": profile_fingerprint(project, s["profile"])}))
                 stage("harmonic_scan")
                 _harmonic_scan(work, s["profile"], profile_dirs)
+                _harmonic_emission(project, work, s["profile"], profile_dirs)  # grid-compliance 29, this stage
                 stage("voltage_stability")
                 _voltage_stability(work, s["profile"], profile_dirs)
                 _voltage_control(work, s["profile"], profile_dirs)      # plan GC-02, inside this stage
@@ -2787,3 +2792,284 @@ def _not_written_item(record) -> dict:
 def powerfactory_bundle_zip(project, name: str) -> tuple:
     """``(zip bytes, stale)`` of one PowerFactory bundle, picked from the listing as ``psse_bundle_zip`` does."""
     return _bundle_zip(powerfactory_bundles(project), _powerfactory_root(project), name, "PowerFactory")
+
+
+# ── the harmonic emission screen, with the background harmonics at the PCC (grid-compliance 29; GC-05) ──
+
+#: The emission screen beside ``campus_harmonics.csv``: what the run took for the background, and the screen's
+#: label; or, when the screen could not run, why.
+HARMONIC_EMISSION_META = "campus_harmonic_emission.json"
+HARMONIC_EMISSION_ERROR = "harmonic_emission_error.json"
+#: The field measurement the next run takes into its emission screen: the CSV as uploaded, under a fixed name
+#: (the client's file name is metadata only), and its provenance.
+BACKGROUND_DIR = "background"
+BACKGROUND_DATA = "measurement.csv"
+BACKGROUND_META = "meta.json"
+#: In the run: the record hash of the measurement it took ("none" when none), and what became of it.
+BACKGROUND_USED_FILE = "background_used.json"
+MAX_BACKGROUND_BYTES = 1024 * 1024
+MAX_BACKGROUND_TEXT = 200
+#: The fields of the stored record the stale check pins (GK A2 D6): a change to any of them marks the run stale.
+BACKGROUND_PINNED = ("sha256", "source", "measured_on", "filename", "poc")
+
+
+def _background_dir(project) -> Path:
+    return campus_dir(project) / BACKGROUND_DIR
+
+
+def _record_sha256(meta: dict | None) -> str:
+    """The hash of the whole stored record (bytes sha256, source, measured_on, filename, PCC); "none"."""
+    if meta is None:
+        return "none"
+    body = json.dumps({k: meta.get(k) for k in BACKGROUND_PINNED}, sort_keys=True)
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
+def _background_meta(d: Path) -> dict | None:
+    """The stored measurement's record, or None when there is none (no record; a CSV without one is a write
+    that never completed and reads as none). A record whose CSV is missing or no longer matches its sha256
+    raises ``ValueError``: reading it as none stored would be wrong."""
+    meta_file = d / BACKGROUND_META
+    if not meta_file.is_file():
+        return None
+    meta = json.loads(meta_file.read_text())
+    data = (d / BACKGROUND_DATA).read_bytes()
+    if not isinstance(meta, dict) or meta.get("sha256") != hashlib.sha256(data).hexdigest():
+        raise ValueError("the stored measurement does not match its record")
+    return meta
+
+
+def _campus_poc(project) -> str:
+    campus = campus_dir(project) / CAMPUS_FILE
+    try:
+        return str(yaml.safe_load(campus.read_text())["campus"]["pcc"]["bus"])
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "campus_background_no_campus",
+            "message": "There is no campus yet: draft the campus first, then upload the measurement at its PCC."
+        }) from exc
+    except (yaml.YAMLError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "campus_background_no_campus",
+            "message": "The campus names no PCC bus: set the PCC bus first, then upload the measurement."
+        }) from exc
+
+
+def _background_view(meta: dict | None, run: Path) -> dict:
+    if meta is None:
+        return {"has_background": False}
+    used = _background_used(run)
+    return {"has_background": True,
+            **{k: meta.get(k) for k in ("source", "measured_on", "filename", "orders", "poc", "uploaded_at")},
+            "in_latest_run": used is not None and used.get("record_sha256") == _record_sha256(meta)
+            and used.get("status") == "used"}
+
+
+def get_background(project) -> dict:
+    """``{has_background, source, measured_on, filename, orders, poc, uploaded_at, in_latest_run}`` of the
+    stored measurement; ``in_latest_run`` is true only when the latest run took this very record."""
+    require_capacity_expansion(project)
+    d = _background_dir(project)
+    with _lock(d):
+        try:
+            meta = _background_meta(d)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "campus_background_unreadable",
+                "message": f"The stored measurement cannot be read ({exc}): remove it and upload it again.",
+            }) from exc
+        return _background_view(meta, campus_dir(project) / "run")
+
+
+def put_background(project, data: bytes, source: str, measured_on: str, filename: str | None) -> dict:
+    """Check the measurement now (``parse_background`` at the campus PCC: bad input is a 422 and nothing is
+    stored), then keep it for the next run. The PCC read, the check and both writes run inside the store's
+    lock; each file goes to a per-call temp file, then a rename, the CSV first. A failed record write puts
+    the earlier CSV back, so the store is the complete earlier pair or the complete new one."""
+    from gridspine.ingest.background_harmonics import parse_background
+    from services.campus_grid_code_service import _write_atomic
+
+    require_capacity_expansion(project)
+    if len(data) > MAX_BACKGROUND_BYTES:
+        raise HTTPException(status_code=413, detail={
+            "error_kind": "campus_background_too_large",
+            "message": f"File: larger than {MAX_BACKGROUND_BYTES // (1024 * 1024)} MB",
+            "field": "file",
+        })
+    source = (source or "").strip()
+    if not source:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "campus_background_invalid",
+            "message": "Source: say who measured it",
+            "field": "source",
+        })
+    filename = Path(filename).name if filename else None
+    for field, label, text in (("source", "Source", source), ("filename", "File", filename or "")):
+        if len(text) > MAX_BACKGROUND_TEXT:
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "campus_background_invalid",
+                "message": f"{label}: longer than {MAX_BACKGROUND_TEXT} characters",
+                "field": field,
+            })
+    try:
+        measured_on = datetime.strptime((measured_on or "").strip(), "%Y-%m-%d").date().isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "campus_background_invalid",
+            "message": "Measured on: enter a date (YYYY-MM-DD)",
+            "field": "measured_on",
+        }) from exc
+    d = _background_dir(project)
+    with _lock(d):
+        poc = _campus_poc(project)
+        try:
+            rec = parse_background(data, poc=poc, source=source, measured_on=measured_on, filename=filename)
+        except ContractError as exc:
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "campus_background_invalid",
+                "message": f"File: {exc}",
+                "field": "file",
+            }) from exc
+        meta = {"source": rec["source"], "measured_on": rec["measured_on"], "filename": filename, "poc": poc,
+                "orders": len(rec["orders_pct"]), "sha256": rec["sha256"],
+                "uploaded_at": datetime.now(timezone.utc).isoformat()}
+        earlier = (d / BACKGROUND_DATA).read_bytes() if (d / BACKGROUND_DATA).is_file() else None
+        _write_atomic(d / BACKGROUND_DATA, data)
+        try:
+            _write_atomic(d / BACKGROUND_META, json.dumps(meta, sort_keys=True))
+        except BaseException:
+            if earlier is None:
+                (d / BACKGROUND_DATA).unlink(missing_ok=True)
+            else:
+                _write_atomic(d / BACKGROUND_DATA, earlier)
+            raise
+        return _background_view(meta, campus_dir(project) / "run")
+
+
+def delete_background(project) -> dict:
+    """Remove the stored measurement, under the store's lock; the next run has none."""
+    require_capacity_expansion(project)
+    d = _background_dir(project)
+    with _lock(d):
+        (d / BACKGROUND_META).unlink(missing_ok=True)   # the record first: a CSV alone reads as none stored
+        (d / BACKGROUND_DATA).unlink(missing_ok=True)
+    return {"has_background": False}
+
+
+def _take_background(project, work: Path) -> dict:
+    """Into the run being built: the stored measurement through GC-05's ``import_background_campus``, and
+    ``BACKGROUND_USED_FILE`` (always written). Returns ``{status: none | used | unusable, record_sha256,
+    citation | reason}``. A record measured at another bus than the run's PCC, or whose bytes no longer
+    parse, is never imported: the run says it is unusable and why (GK A2 D5)."""
+    from gridspine.ingest.background_harmonics import citation
+
+    d = _background_dir(project)
+    reason = None
+    with _lock(d):
+        try:
+            meta = _background_meta(d)
+            data = (d / BACKGROUND_DATA).read_bytes() if meta is not None else None
+        except (OSError, ValueError) as exc:
+            meta, data = None, None
+            reason = f"the stored measurement cannot be read ({exc}); remove it and upload it again"
+    if reason is not None:
+        out = {"status": "unusable", "record_sha256": "unreadable", "reason": reason}
+    elif meta is None:
+        out = {"status": "none", "record_sha256": "none"}
+    else:
+        out = {"record_sha256": _record_sha256(meta)}
+        pcc = str(yaml.safe_load((work / cs.CAMPUS_YAML).read_text())["campus"]["pcc"]["bus"])
+        if str(meta.get("poc")) != pcc:
+            out.update(status="unusable", reason=f"it was measured at {meta.get('poc')}, but the campus PCC is "
+                                                 f"now {pcc}; upload it again for {pcc}")
+        else:
+            try:
+                rec = cs.import_background_campus(work, data, meta["source"], meta["measured_on"],
+                                                  meta.get("filename"))
+            except ContractError as exc:
+                out.update(status="unusable", reason=f"the stored measurement no longer reads ({exc}); "
+                                                     "upload it again")
+            else:
+                out.update(status="used", citation=citation(rec))
+    (work / BACKGROUND_USED_FILE).write_text(json.dumps(out))
+    return out
+
+
+def _background_used(run: Path) -> dict | None:
+    """What the run took (``_take_background``); None for a run from before it was kept."""
+    try:
+        used = json.loads((run / BACKGROUND_USED_FILE).read_text())
+    except (OSError, ValueError):
+        return None
+    return used if isinstance(used, dict) else None
+
+
+def _background_pins(project, d: Path) -> list[Pin]:
+    """The record the run took against the one stored now; none for a run from before it was kept. An
+    unreadable store breaks the pin: stale."""
+    used = _background_used(d / "run")
+    if used is None:
+        return []
+    return [Pin("background", used.get("record_sha256"),
+                lambda: _record_sha256(_background_meta(_background_dir(project))))]
+
+
+def _unknown_background_rows(out: pd.DataFrame, reason: str) -> pd.DataFrame:
+    """``out`` plus one "with background" row per PoC row, verdict unknown, for a stored measurement the run
+    could not take: the run never silently screens without it (GK A2 D5). Built on the PoC row as
+    ``campus_study._with_background`` builds its own, so it has the same columns; no distortion value is
+    stated (None, never 0); the limit stays, as it does not depend on the background."""
+    from gridspine.ingest.background_harmonics import WITH_BACKGROUND
+    from gridspine.static import harmonics as hm
+
+    blank = ("u_h_pct", "thd_pct", "thd_margin_pct", "worst_order", "worst_u_h_pct", "worst_limit_pct",
+             "failing_orders")
+    rows = []
+    for row in out[out["level"] == "poc"].to_dict("records"):
+        rows.append(dict(row, **dict.fromkeys(blank), label=f"{WITH_BACKGROUND}; {hm.LABEL}",
+                         verdict="unknown", note=f"Background not used: {reason}"))
+    return pd.concat([out, pd.DataFrame(rows, columns=out.columns, dtype=object)], ignore_index=True)
+
+
+def _harmonic_emission(project, run: Path, profile: str, profile_dirs) -> None:
+    """The harmonic emission screen of the prepared run (``campus_study.harmonics_campus``), with the stored
+    background taken first (``_take_background``); its meta in ``HARMONIC_EMISSION_META``. A screen beside
+    the sizing: a failure never fails the run, the reason goes to ``HARMONIC_EMISSION_ERROR`` and no
+    ``campus_harmonics.csv`` stays."""
+    from gridspine.static import harmonics as hm
+
+    from services.atomic_io import atomic_write_text
+
+    files = (cs.HARMONICS_CSV, HARMONIC_EMISSION_META, HARMONIC_EMISSION_ERROR)
+
+    def clear():
+        for name in files:
+            (run / name).unlink(missing_ok=True)
+
+    clear()
+    try:
+        background = _take_background(project, run)
+        out = cs.harmonics_campus(run, profile, profile_dirs)
+        if background["status"] == "unusable":
+            out = _unknown_background_rows(out, background["reason"])
+            atomic_write_text(run / cs.HARMONICS_CSV, out.to_csv(index=False))
+    except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the harmonic emission screen failed in %s", run)
+        clear()
+        (run / HARMONIC_EMISSION_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+        return
+    meta = {"background": {k: v for k, v in background.items() if k != "record_sha256"}, "label": hm.LABEL}
+    (run / HARMONIC_EMISSION_META).write_text(json.dumps(meta))
+
+
+def _harmonic_emission_results(run: Path) -> dict | None:
+    """The emission screen for ``get_state``: ``{error}`` when it could not run (no rows), else its meta with
+    the rows of ``campus_harmonics.csv``; None for a run from before the screen was a stage."""
+    error = run / HARMONIC_EMISSION_ERROR
+    if error.is_file():
+        return json.loads(error.read_text())
+    meta = run / HARMONIC_EMISSION_META
+    if not meta.is_file():
+        return None
+    return {**json.loads(meta.read_text()), "rows": _read_csv(run / cs.HARMONICS_CSV) or []}
