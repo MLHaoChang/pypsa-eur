@@ -53,9 +53,14 @@ MESSAGE = "You can view this project. Ask its owner for edit access."
 REFUSAL = f"{KIND}: {MESSAGE}"  # a run's `error` when its requester lost edit access
 
 
-def refusal() -> HTTPException:
+def message(owner_email: str | None = None) -> str:
+    """The refusal sentence, naming the owner when known (the GUI banner's words)."""
+    return MESSAGE.replace("its owner", owner_email) if owner_email else MESSAGE
+
+
+def refusal(owner_email: str | None = None) -> HTTPException:
     # The kind is spelled out: the tool-error manifest test derives kinds from literals.
-    return HTTPException(403, {"error_kind": "project_view_only", "message": MESSAGE})
+    return HTTPException(403, {"error_kind": "project_view_only", "message": message(owner_email)})
 
 
 def require_writable(db: DBSession, user: User | None, project: Project | None) -> None:
@@ -67,7 +72,7 @@ def require_writable(db: DBSession, user: User | None, project: Project | None) 
     if user is None or project is None:
         return
     if project_acl.project_role(db, user, project) == project_acl.VIEW:
-        raise refusal()
+        raise refusal(project_acl.owner_email(db, project))
 
 
 def is_viewer(db: DBSession, user: User | None, project_uuid: str | None) -> bool:

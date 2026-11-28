@@ -341,3 +341,11 @@ def test_refusal_cause_sentence_matches_the_frontend_wording():
     ).read_text()
     assert MESSAGE.split(". ")[0] + "." in src
     assert MESSAGE == "You can view this project. Ask its owner for edit access."
+
+
+def test_refusal_names_the_owner_like_the_banner():
+    from services.project_write_gate import MESSAGE, refusal
+
+    named = refusal("o@x.com").detail["message"]
+    assert named == "You can view this project. Ask o@x.com for edit access."
+    assert refusal().detail["message"] == MESSAGE

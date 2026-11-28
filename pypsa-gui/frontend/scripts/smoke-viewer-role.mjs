@@ -84,6 +84,9 @@ try {
   check(await dlg.getByRole('button', { name: 'Save' }).isDisabled(), 'Share: Save is disabled until something changes')
   await dlg.getByLabel(viewerEmail).check()
   await dlg.getByLabel(`Role for ${viewerEmail}`).selectOption('viewer')
+  const skip = op.getByRole('button', { name: 'Skip tour' })
+  if (await skip.count()) await skip.click()
+  await op.getByTestId('guide-tour').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
   if (shotsAt) await op.screenshot({ path: path.join(shotsAt, 'guided-share-dialog.png') })
   await dlg.getByRole('button', { name: 'Save' }).click()
   await dlg.waitFor({ state: 'detached' })
@@ -114,7 +117,15 @@ try {
     headers: { 'X-CSRF-Token': guestCsrf }, data: {} })
   check(write.status() === 403 && JSON.stringify(await write.json()).includes('project_view_only'), 'a write is refused as project_view_only')
 
-  // Owner makes the colleague an editor; a reload lets them edit.
+  // Owner in Expert: the Workspace panel's Share button, then make the colleague an editor.
+  await op.evaluate(() => localStorage.setItem('network-diagram:ui-mode', 'expert'))
+  await op.reload()
+  const wsItem = op.getByText('Workspace panel', { exact: true })
+  if (!(await wsItem.isVisible().catch(() => false))) await op.getByRole('button', { name: 'Project menu' }).click()
+  await wsItem.click()
+  await op.getByRole('button', { name: 'Share' }).waitFor({ timeout: 30_000 })
+  check((await op.getByRole('button', { name: 'Share' }).count()) === 1, 'Expert: one Share entry, in the Workspace panel')
+  if (shotsAt) await op.screenshot({ path: path.join(shotsAt, 'expert-workspace-share.png') })
   await op.getByRole('button', { name: 'Share' }).click()
   const dlg2 = op.getByRole('dialog', { name: /^Share/ })
   await dlg2.getByLabel(`Role for ${viewerEmail}`).selectOption('editor')
