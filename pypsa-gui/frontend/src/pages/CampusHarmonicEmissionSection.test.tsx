@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import CampusHarmonicEmissionSection, { backgroundText } from './CampusHarmonicEmissionSection'
+import CampusHarmonicEmissionSection, { backgroundText, basisText, EMISSION_FAILED } from './CampusHarmonicEmissionSection'
 import type { HarmonicEmission } from '../api/campusElectrical'
 
 const rows = [
@@ -14,7 +14,8 @@ describe('CampusHarmonicEmissionSection', () => {
     const { rerender } = render(<CampusHarmonicEmissionSection emission={null} />)
     expect(screen.getByTestId('emission-not-computed')).toBeTruthy()
     rerender(<CampusHarmonicEmissionSection emission={{ error: 'boom' }} />)
-    expect(screen.getByTestId('emission-error').textContent).toContain('boom')
+    expect(screen.getByTestId('emission-error').textContent).toBe(EMISSION_FAILED)
+    expect(screen.queryByText(/boom/)).toBeNull()
   })
   it('counts the verdicts, keys the chips and gives a reason per not-judged row', () => {
     const e: HarmonicEmission = { background: { status: 'none' }, label: 'Screening', rows }
@@ -30,5 +31,9 @@ describe('CampusHarmonicEmissionSection', () => {
       .toBe('Background: utility measurement of 2026-10-03, used.')
     expect(backgroundText({ status: 'unusable', reason: 'it was measured at another bus' }))
       .toBe('Background not used: it was measured at another bus.')
+  })
+  it('writes the basis as capitalised sentences', () => {
+    expect(basisText('static screen; binding answer is a load-flow study'))
+      .toBe('Static screen. The binding answer is a load-flow study.'.replace('The binding', 'Binding'))
   })
 })

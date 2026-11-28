@@ -7,6 +7,14 @@ import { PageSection } from '../components/PageKit'
 import { showGridReadiness } from '../layout/flowNavigation'
 import { TableScroll } from './CampusInvestmentSection'
 
+/** The screen's own failure text is an exception message, never shown: one sentence for every cause. */
+export const EMISSION_FAILED = 'The emission screen could not run for this campus. The sizing and checks above still stand.'
+
+/** "static screen; binding answer is …" as sentences: "Static screen. The binding answer is …". */
+export function basisText(label: string): string {
+  return label.split('; ').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('. ') + '.'
+}
+
 const TITLE = 'Harmonic emission (screening)'
 
 const fig = (v: number | null | undefined): string =>
@@ -45,7 +53,7 @@ export default function CampusHarmonicEmissionSection({ emission }: { emission: 
     return (
       <PageSection title={TITLE}>
         <p data-testid="emission-error" className="px-4 py-3 text-[12px] text-warn">
-          The emission screen could not run for this campus: {emission.error}. The sizing and checks above still stand.
+          {EMISSION_FAILED}
         </p>
       </PageSection>
     )
@@ -112,7 +120,7 @@ export default function CampusHarmonicEmissionSection({ emission }: { emission: 
         <p data-testid="emission-key" className="text-[11px] text-muted">
           Pass: within the limit. Fail: over it. Not judged: an input is missing, so the screen gives no verdict.
         </p>
-        <p className="text-[11px] text-muted">Basis: {emission.label.split('; ').join('. ')}.</p>
+        <p className="text-[11px] text-muted">Basis: {basisText(emission.label)}</p>
       </div>
     </PageSection>
   )
