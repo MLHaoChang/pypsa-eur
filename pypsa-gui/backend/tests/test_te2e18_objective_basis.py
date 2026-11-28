@@ -7,6 +7,7 @@ total; `cost_breakdown.total` (Summary) is the undiscounted one. The decompositi
 must price the LP side with the weights the solve used, so its residual is ~0 and the
 discounting shows as `period_weighting_adjustment_eur`.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -30,8 +31,14 @@ def _solved(tid):
     n = T.BUILDERS[tid]()
     PyPSAService.set_network(n)
     cfg = _solver_config_from_dict(T.solver_config(tid))
-    status, condition = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
-                                       queue.SimpleQueue(), state_update=lambda **kw: None)
+    status, condition = run_simulation(
+        cfg,
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **kw: None,
+    )
     assert status in ("ok", "optimal"), (status, condition)
     return n, cfg
 
@@ -49,9 +56,14 @@ def test_auto_discount_factors_are_pv_times_years():
     p0 = min(int(p) for p in n.investment_periods)
     assert f["ref_year"] == p0 and f["real_rate"] == pytest.approx(r)
     for p in n.investment_periods:
-        assert f["factors"][int(p)] == pytest.approx((1 + r) ** -(int(p) - p0) * float(years[p]))
+        assert f["factors"][int(p)] == pytest.approx(
+            (1 + r) ** -(int(p) - p0) * float(years[p])
+        )
     # Off: no factors.
-    assert auto_discount_factors(n, dataclasses.replace(cfg, auto_discount_periods=False)) is None
+    assert (
+        auto_discount_factors(n, dataclasses.replace(cfg, auto_discount_periods=False))
+        is None
+    )
 
 
 @pytest.mark.live_solve
@@ -84,15 +96,20 @@ def _status_with(monkeypatch, n, objective=1.0e6):
 
 
 @pytest.mark.live_solve
-def test_the_status_reads_the_solves_stamp_not_todays_config(monkeypatch, reset_backend):
+def test_the_status_reads_the_solves_stamp_not_todays_config(
+    monkeypatch, reset_backend
+):
     from routers import simulation
 
     n, cfg = _solved("eh_h2_hub_staged")
     p0 = min(int(p) for p in n.investment_periods)
     assert _status_with(monkeypatch, n) == ("lp_objective", p0)
     # The toggle and strategy changed after the solve: the figure is still the one solved.
-    monkeypatch.setitem(simulation._state, "solver_config",
-                        dataclasses.replace(cfg, auto_discount_periods=False, solve_strategy="rolling"))
+    monkeypatch.setitem(
+        simulation._state,
+        "solver_config",
+        dataclasses.replace(cfg, auto_discount_periods=False, solve_strategy="rolling"),
+    )
     assert _status_with(monkeypatch, n) == ("lp_objective", p0)
 
 
@@ -124,12 +141,18 @@ def test_a_rate_changed_after_the_solve_does_not_move_the_bridge(reset_backend):
     before = compute_objective_decomposition(n, cb, cfg)
     later = dataclasses.replace(cfg, discount_rate=0.15, auto_discount_periods=False)
     after = compute_objective_decomposition(n, compute_cost_breakdown(n, later), later)
-    assert after["discount"] == before["discount"] and before["discount"]["real_rate"] > 0
-    assert abs(after["residual_gap_eur"]) <= max(1.0, 1e-6 * abs(after["lp_total"])), after
+    assert (
+        after["discount"] == before["discount"] and before["discount"]["real_rate"] > 0
+    )
+    assert abs(after["residual_gap_eur"]) <= max(1.0, 1e-6 * abs(after["lp_total"])), (
+        after
+    )
 
 
 @pytest.mark.live_solve
-def test_a_failed_discount_setup_stamps_none_and_the_gap_stays_unexplained(monkeypatch, reset_backend):
+def test_a_failed_discount_setup_stamps_none_and_the_gap_stays_unexplained(
+    monkeypatch, reset_backend
+):
     from services.solver import assumptions
     from services.solver.assumptions import SOLVE_DISCOUNT_META
     from services.results.cost_breakdown import compute_cost_breakdown
@@ -156,20 +179,30 @@ def test_the_decomposition_reads_unknown_without_a_stamp_and_keeps_the_rolling_p
     n = T.BUILDERS[tid]()
     cfg = _solver_config_from_dict(T.solver_config(tid))
     cb = {"total": 2.0e6, "opex": 1.0e6, "by_period": []}
-    dec = compute_objective_decomposition(n, cb, dataclasses.replace(cfg, solve_strategy="rolling"))
+    dec = compute_objective_decomposition(
+        n, cb, dataclasses.replace(cfg, solve_strategy="rolling")
+    )
     assert dec["lp_total_scope"] == "last_window" and dec["residual_gap_eur"] is None
-    assert dec["discount"] is None  # no bridge on the rolling path: nothing is said about weights
+    assert (
+        dec["discount"] is None
+    )  # no bridge on the rolling path: nothing is said about weights
     from services.results import objective_decomposition as od
 
     assert od._bridge(n, cb, cfg)["discount"] == "unknown"
 
 
 @pytest.mark.live_solve
-def test_the_stamp_is_json_scalars_survives_a_save_and_leaves_the_fingerprint(tmp_path, reset_backend):
+def test_the_stamp_is_json_scalars_survives_a_save_and_leaves_the_fingerprint(
+    tmp_path, reset_backend
+):
     import json
 
     import pypsa
-    from services.solver.assumptions import SOLVE_DISCOUNT_META, SOLVE_STRATEGY_META, solve_discount
+    from services.solver.assumptions import (
+        SOLVE_DISCOUNT_META,
+        SOLVE_STRATEGY_META,
+        solve_discount,
+    )
     from services.workflow_tools import _network_input_fingerprint
     from services.pypsa_service import PyPSAService
 
@@ -181,14 +214,22 @@ def test_the_stamp_is_json_scalars_survives_a_save_and_leaves_the_fingerprint(tm
     # The solve wrote these weights into ipw and the stamp from the one dict.
     from services.solver.assumptions import auto_discount_factors
 
-    assert {int(p): f for p, f in stamp["factors"].items()} == auto_discount_factors(n, cfg)["factors"]
+    assert {int(p): f for p, f in stamp["factors"].items()} == auto_discount_factors(
+        n, cfg
+    )["factors"]
 
     ctx = PyPSAService.build_context()
     ctx.network = n
     ctx.solver_state["solver_config"] = cfg
-    with_stamp = (_network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True))
+    with_stamp = (
+        _network_input_fingerprint(ctx),
+        _network_input_fingerprint(ctx, exact=True),
+    )
     saved = {k: n.meta.pop(k) for k in (SOLVE_DISCOUNT_META, SOLVE_STRATEGY_META)}
-    without = (_network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True))
+    without = (
+        _network_input_fingerprint(ctx),
+        _network_input_fingerprint(ctx, exact=True),
+    )
     n.meta.update(saved)
     assert with_stamp == without
 
