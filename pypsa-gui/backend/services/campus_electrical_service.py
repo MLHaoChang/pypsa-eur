@@ -107,7 +107,9 @@ try:
     from gridspine.drivers import process_chain
     from gridspine.drivers.campus_study import SizingCriteria
     from gridspine.schema.contracts import ContractError
+    from gridspine.ingest import background_harmonics as bh
     from gridspine.static import harmonic_scan as hs
+    from gridspine.static import harmonics as hm
     from gridspine.static import parallel
     from gridspine.static import restart_sequence as rs
     from gridspine.static import subsync_scan as ss
@@ -119,7 +121,7 @@ try:
 except ImportError as exc:                      # pragma: no cover - build-shape branch
     CAMPUS_AVAILABLE = False
     CAMPUS_IMPORT_ERROR = str(exc)
-    cs = SizingCriteria = parallel = hs = process_chain = rs = rt = ss = None
+    cs = SizingCriteria = parallel = hs = process_chain = rs = rt = ss = bh = hm = None
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
@@ -2890,7 +2892,6 @@ def put_background(project, data: bytes, source: str, measured_on: str, filename
     stored), then keep it for the next run. The PCC read, the check and both writes run inside the store's
     lock; each file goes to a per-call temp file, then a rename, the CSV first. A failed record write puts
     the earlier CSV back, so the store is the complete earlier pair or the complete new one."""
-    from gridspine.ingest.background_harmonics import parse_background
     from services.campus_grid_code_service import _write_atomic
 
     require_capacity_expansion(project)
@@ -2927,7 +2928,7 @@ def put_background(project, data: bytes, source: str, measured_on: str, filename
     with _lock(d):
         poc = _campus_poc(project)
         try:
-            rec = parse_background(data, poc=poc, source=source, measured_on=measured_on, filename=filename)
+            rec = bh.parse_background(data, poc=poc, source=source, measured_on=measured_on, filename=filename)
         except ContractError as exc:
             raise HTTPException(status_code=422, detail={
                 "error_kind": "campus_background_invalid",
@@ -2965,8 +2966,6 @@ def _take_background(project, work: Path) -> dict:
     ``BACKGROUND_USED_FILE`` (always written). Returns ``{status: none | used | unusable, record_sha256,
     citation | reason}``. A record measured at another bus than the run's PCC, or whose bytes no longer
     parse, is never imported: the run says it is unusable and why (GK A2 D5)."""
-    from gridspine.ingest.background_harmonics import citation
-
     d = _background_dir(project)
     reason = None
     with _lock(d):
@@ -2993,7 +2992,7 @@ def _take_background(project, work: Path) -> dict:
                 out.update(status="unusable", reason=f"the stored measurement no longer reads ({exc}); "
                                                      "upload it again")
             else:
-                out.update(status="used", citation=citation(rec))
+                out.update(status="used", citation=bh.citation(rec))
     (work / BACKGROUND_USED_FILE).write_text(json.dumps(out))
     return out
 
@@ -3026,14 +3025,11 @@ def _unknown_background_rows(out: pd.DataFrame, reason: str) -> pd.DataFrame:
     could not take: the run never silently screens without it (GK A2 D5). Built on the PoC row as
     ``campus_study._with_background`` builds its own, so it has the same columns; no distortion value is
     stated (None, never 0); the limit stays, as it does not depend on the background."""
-    from gridspine.ingest.background_harmonics import WITH_BACKGROUND
-    from gridspine.static import harmonics as hm
-
     blank = ("u_h_pct", "thd_pct", "thd_margin_pct", "worst_order", "worst_u_h_pct", "worst_limit_pct",
              "failing_orders")
     rows = []
     for row in out[out["level"] == "poc"].to_dict("records"):
-        rows.append(dict(row, **dict.fromkeys(blank), label=f"{WITH_BACKGROUND}; {hm.LABEL}",
+        rows.append(dict(row, **dict.fromkeys(blank), label=f"{bh.WITH_BACKGROUND}; {hm.LABEL}",
                          verdict="unknown", note=f"Background not used: {reason}; {row['note']}"))
     return pd.concat([out, pd.DataFrame(rows, columns=out.columns, dtype=object)], ignore_index=True)
 
@@ -3043,8 +3039,6 @@ def _harmonic_emission(project, run: Path, profile: str, profile_dirs) -> None:
     background taken first (``_take_background``); its meta in ``HARMONIC_EMISSION_META``. A screen beside
     the sizing: a failure never fails the run, the reason goes to ``HARMONIC_EMISSION_ERROR`` and no
     ``campus_harmonics.csv`` stays."""
-    from gridspine.static import harmonics as hm
-
     from services.atomic_io import atomic_write_text
 
     files = (cs.HARMONICS_CSV, HARMONIC_EMISSION_META, HARMONIC_EMISSION_ERROR)
