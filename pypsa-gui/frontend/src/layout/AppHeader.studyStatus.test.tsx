@@ -11,7 +11,7 @@ import { useUIStore } from '../store/uiStore'
 import { useSimulationStore } from '../store/simulationStore'
 import { WRITABLE } from '../utils/lockState'
 import type { RunView } from '../utils/runStatus'
-import type { EhStudyPayload } from '../api/simulation'
+import { simulationApi, type EhStudyPayload } from '../api/simulation'
 
 vi.mock('../hooks/useSolveQueue', () => ({
   useSolveQueue: () => ({ data: { jobs: [], running: [], paused: false } }),
@@ -65,6 +65,18 @@ describe('AppHeader status pill with a Guided study', () => {
     renderHeader()
     expect(screen.getByText('Running study…')).toBeTruthy()
     expect(screen.queryByText('Idle')).toBeNull()
+  })
+
+  it('names the Expert solve in the Run button\'s own word', async () => {
+    useSimulationStore.setState({ status: 'running' })
+    const spy = vi.spyOn(simulationApi, 'getSolverConfig')
+    spy.mockResolvedValue({ mode: 'lopf' } as never)
+    const { unmount } = renderHeader()
+    expect(screen.getByText('Running LOPF…')).toBeTruthy()
+    unmount()
+    spy.mockResolvedValue({ mode: 'lpf' } as never)
+    renderHeader()
+    await waitFor(() => expect(screen.getByText('Running Load Flow…')).toBeTruthy())
   })
 
   it('reads "Idle" when nothing runs', () => {
