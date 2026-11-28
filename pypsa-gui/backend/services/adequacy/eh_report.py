@@ -75,9 +75,8 @@ CONNECTION_TOL_MW = 1e-6
 #: ``eh_role`` and ``eh_poc`` rules every template uses read the network alone.
 _DEFAULT_REQUEST = {"archetype": "strong_grid"}
 
-NO_REQUEST_REFUSAL = ("The grid import links are not marked (eh_role grid_import or a bus "
-                      "tagged eh_poc), and without the study's site type the connection "
-                      "limit can't be read.")
+NO_REQUEST_REFUSAL = ("No link is marked as the grid import, so the connection limit "
+                      "can't be read: set the grid link's role to Grid import.")
 
 
 def _picked_by_carrier(n) -> bool:
@@ -107,44 +106,9 @@ def _weighted_energy(n, name: str) -> float | None:
     return float((p[name] * n.snapshot_weightings.generators).sum())
 
 
-def _site_side(n, bus: str, links: set[str]) -> list[str]:
-    """What else sits on a grid-side bus besides the import Links: loads,
-    stores, storage, another Link, a Line or a Transformer. Empty: the bus is
-    the grid's alone (GK A 33 S2)."""
-    found: list[str] = []
-    for word, table in (("load", n.loads), ("store", n.stores),
-                        ("storage unit", n.storage_units)):
-        if not table.empty and "bus" in table.columns:
-            found += [f"{word} {x}" for x in table.index[table["bus"].astype(str) == bus]]
-    for word, table in (("link", n.links), ("line", n.lines), ("transformer", n.transformers)):
-        if table.empty:
-            continue
-        # Every port: a multi-port Link can draw from the bus on bus2, bus3...
-        ports = [c for c in table.columns if c.startswith("bus") and c[3:].isdigit()]
-        ends = table[ports].astype(str).eq(bus).any(axis=1)
-        found += [f"{word} {x}" for x in table.index[ends]
-                  if not (word == "link" and (str(x) in links or _export_only(n, str(x), bus)))]
-    return found
-
-
-def _export_only(n, link: str, bus: str) -> bool:
-    """A Link that only delivers INTO ``bus``: an export to the grid, which
-    carries no grid power into the site. ``bus`` is its ``bus1`` and on no
-    other port, and it never reverses or draws: ``p_min_pu`` not below 0 and
-    ``efficiency`` above 0, static and in their series (GK A 33)."""
-    row = n.links.loc[link]
-    ports = [c for c in n.links.columns if c.startswith("bus") and c[3:].isdigit()]
-    if str(row["bus1"]) != bus or any(
-            str(row[c]) == bus for c in ports if c != "bus1"):
-        return False
-    for attr, ok in (("p_min_pu", lambda v: v >= 0), ("efficiency", lambda v: v > 0)):
-        values = [float(row.get(attr, 0.0 if attr == "p_min_pu" else 1.0))]
-        series = getattr(n.links_t, attr, None)
-        if series is not None and link in series.columns:
-            values += [float(series[link].min())]
-        if not all(ok(v) for v in values):
-            return False
-    return True
+# One rule for "the grid-side bus holds nothing else of the site's", shared
+# with section 5's site assets (GK A 40, follow-up b); the old names stay.
+from services.flow_service import _export_only, site_equipment_on as _site_side  # noqa: E402
 
 
 def _import_peaks(n, links: tuple[str, ...]) -> dict[Any, float] | None:
@@ -176,7 +140,7 @@ def _connection(n, request: dict | None) -> tuple[dict[str, Any], set[str]]:
     with no Link to it is the grid itself, with no limit between: "unbounded"
     (SH 40's PCC rule, GK A 33 S2)."""
     from services.adequacy.archetypes import _poc_buses
-    from services.flow_service import ImportCapacity, import_capacity
+    from services.flow_service import ImportCapacity, import_capacity, site_equipment_on
 
     cap = import_capacity(n, request or _DEFAULT_REQUEST)
     if request is None and cap.links and _picked_by_carrier(n):
@@ -206,7 +170,7 @@ def _connection(n, request: dict | None) -> tuple[dict[str, Any], set[str]]:
             counted += [f"{g} is counted: bus {bus} is marked as the point of connection, "
                         "but no grid import link leaves it" for g in here]
             continue
-        others = _site_side(n, bus, links)
+        others = site_equipment_on(n, bus, links)
         if others:
             counted += [f"{g} is counted: bus {bus} also holds {', '.join(others)}" for g in here]
         else:
@@ -230,6 +194,18 @@ def _connection(n, request: dict | None) -> tuple[dict[str, Any], set[str]]:
                                        if peaks and None not in peaks else None),
         "connection_check": check,
     }, supply
+
+
+def _horizon_words(n) -> str | None:
+    """"2027–2035" on a staged plan (its first and last period), "2030" with
+    one period; "8,760 h" on a single-period network (its weighted hours);
+    None with no snapshots."""
+    periods = [int(p) for p in getattr(n, "investment_periods", ())]
+    if periods:
+        return f"{periods[0]}–{periods[-1]}" if len(periods) > 1 else str(periods[0])
+    if len(n.snapshots) == 0:
+        return None
+    return f"{float(n.snapshot_weightings.generators.sum()):,.0f} h"
 
 
 def _product_slacks(n) -> list[dict[str, Any]]:
@@ -281,6 +257,8 @@ def sizing_summary_from_network(n, request: dict | None = None) -> dict[str, Any
         "total_p_nom_mw": float(total),
         **connection,
         "product_slacks": slacks,
+        # The span the slacks' energy is over, in words (UX 34).
+        "horizon": _horizon_words(n),
         "assets": sized_assets(n),
         # False: the network was not solved, so `assets` carry no built size.
         "assets_solved": bool(getattr(n, "is_solved", False)),
