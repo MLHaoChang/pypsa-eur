@@ -268,7 +268,11 @@ def test_any_other_dequeue_failure_keeps_queue_error_and_no_card(
     job = None
     while time.time() < deadline:
         jobs = client.get("/api/simulation/queue").json()
-        job = next(j for j in (jobs if isinstance(jobs, list) else jobs["jobs"]) if j["id"] == jid)
+        job = next(
+            j
+            for j in (jobs if isinstance(jobs, list) else jobs["jobs"])
+            if j["id"] == jid
+        )
         if job["status"] in ("failed", "completed", "aborted"):
             break
         time.sleep(0.1)
